@@ -207,6 +207,33 @@ def load_thresholds(path: Path) -> dict:
     return result
 
 
+def save_code_mapping(
+    path: Path,
+    code_column: str,
+    level_columns: list[str],
+    mapping: dict[str, list[str]],
+):
+    """Save a code mapping (pipe-delimited path → list of codes) to disk."""
+    path = Path(path)
+    data = {
+        "code_column": code_column,
+        "level_columns": level_columns,
+        "mapping": mapping,
+    }
+    with open(path / "code_mapping.json", "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def load_code_mapping(path: Path) -> dict | None:
+    """Load code mapping from disk, or None if it doesn't exist."""
+    path = Path(path)
+    cm_path = path / "code_mapping.json"
+    if not cm_path.exists():
+        return None
+    with open(cm_path) as f:
+        return json.load(f)
+
+
 def delete_model(path: Path):
     """Delete a model directory."""
     path = Path(path)

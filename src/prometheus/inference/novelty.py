@@ -61,7 +61,7 @@ class NoveltyDetector:
             self.centroids[class_name] = ClassCentroid(
                 centroid=centroid,
                 mean_dist=float(distances.mean()),
-                std_dist=float(distances.std()) if len(distances) > 1 else 1.0,
+                std_dist=max(float(distances.std()), 0.1) if len(distances) > 1 else 1.0,
                 p95_dist=float(np.percentile(distances, 95)) if len(distances) > 1 else float(distances.max()),
                 count=int(mask.sum()),
             )
@@ -126,7 +126,7 @@ class NoveltyDetector:
             self.centroids[str(name)] = ClassCentroid(
                 centroid=data[f"centroid_{i}"],
                 mean_dist=float(mean_dists[i]),
-                std_dist=float(std_dists[i]),
+                std_dist=max(float(std_dists[i]), 0.1),
                 p95_dist=float(p95_dists[i]),
                 count=int(counts[i]),
             )

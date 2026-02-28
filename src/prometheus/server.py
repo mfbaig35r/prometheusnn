@@ -39,7 +39,10 @@ from prometheus.storage.model_store import (
     delete_model as delete_model_from_disk,
     generate_thresholds,
     ModelManifest,
+    save_code_mapping,
+    load_code_mapping,
 )
+from prometheus.inference.summary import build_prediction_summary
 
 mcp = FastMCP(
     "PrometheusNN",
@@ -210,6 +213,19 @@ _config.ensure_dirs()
 
 # Cache loaded predictors: {model_name: CascadePredictor}
 _predictor_cache: dict[str, CascadePredictor] = {}
+
+# Cache loaded code mappings: {model_name: dict | None}
+_code_mapping_cache: dict[str, dict | None] = {}
+
+
+def _get_code_mapping(model_name: str) -> dict | None:
+    """Get or load code mapping for a model."""
+    if model_name in _code_mapping_cache:
+        return _code_mapping_cache[model_name]
+    model_path = _config.model_path(model_name)
+    mapping = load_code_mapping(model_path)
+    _code_mapping_cache[model_name] = mapping
+    return mapping
 
 
 def _get_predictor(model_name: str) -> CascadePredictor:
@@ -595,6 +611,16 @@ def predict(
             if insights:
                 response["insights"] = insights
 
+        code_mapping = _get_code_mapping(model_name)
+        response["summary"] = build_prediction_summary(
+            predictions=response["predictions"],
+            forked_completions=response.get("forked_completions"),
+            routing=response["routing"],
+            path_score=response["path_score"],
+            level_names=predictor.taxonomy.level_names,
+            code_mapping=code_mapping,
+        )
+
         return success_response(response)
     except Exception as e:
         return internal_error(str(e))
@@ -816,6 +842,80 @@ def export_model(
         return success_response({"exported_to": str(dest)})
     except Exception as e:
         return internal_error(str(e))
+
+
+# ─── Code Mapping ───
+
+
+@mcp.tool()
+def build_code_mapping(
+    model_name: str,
+    file_path: str,
+    code_column: str,
+    level_columns: list[str] | None = None,
+) -> dict:
+    """Build a code mapping from training data so predictions include source codes.
+
+    Reads the CSV, groups unique taxonomy paths, and maps each path to its
+    associated code(s). Saves to the model directory for automatic use by predict.
+
+    Args:
+        model_name: Name of existing model
+        file_path: Path to CSV with code column and level columns
+        code_column: Column containing codes (e.g., "hts8", "naics_code")
+        level_columns: Ordered label columns (defaults to model's taxonomy level names)
+    """
+    try:
+        model_path = _config.model_path(model_name)
+        if not (model_path / "manifest.json").exists():
+            return validation_error(f"Model '{model_name}' not found")
+
+        with open(model_path / "manifest.json") as f:
+            manifest = json.load(f)
+
+        taxonomy_levels = [l["name"] for l in manifest["taxonomy"]["levels"]]
+        cols = level_columns or taxonomy_levels
+
+        df = load_dataframe(file_path)
+
+        # Validate columns exist
+        missing = [c for c in cols + [code_column] if c not in df.columns]
+        if missing:
+            return validation_error(f"Columns not found: {missing}")
+
+        # Drop rows with missing values in required columns
+        df = df.dropna(subset=cols + [code_column]).reset_index(drop=True)
+
+        # Build mapping: pipe-delimited path → sorted deduplicated code list
+        mapping: dict[str, list[str]] = {}
+        for _, row in df.iterrows():
+            path_key = "|".join(str(row[c]) for c in cols)
+            code = str(row[code_column]).strip()
+            if path_key not in mapping:
+                mapping[path_key] = set()
+            mapping[path_key].add(code)
+
+        # Convert sets to sorted lists
+        mapping = {k: sorted(v) for k, v in mapping.items()}
+
+        save_code_mapping(model_path, code_column, cols, mapping)
+        _code_mapping_cache.pop(model_name, None)
+
+        multi_code_paths = sum(1 for v in mapping.values() if len(v) > 1)
+        all_codes = set()
+        for codes in mapping.values():
+            all_codes.update(codes)
+
+        return success_response({
+            "model_name": model_name,
+            "code_column": code_column,
+            "level_columns": cols,
+            "unique_paths": len(mapping),
+            "unique_codes": len(all_codes),
+            "multi_code_paths": multi_code_paths,
+        }, "Code mapping saved")
+    except Exception as e:
+        return internal_error(str(e), traceback.format_exc())
 
 
 # ─── Evaluation & Diagnostics ───
