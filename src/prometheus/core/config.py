@@ -1,5 +1,6 @@
 """Configuration and directory management."""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -7,8 +8,12 @@ from pathlib import Path
 @dataclass
 class PrometheusConfig:
     """Global configuration for Prometheus."""
-    base_dir: Path = field(default_factory=lambda: Path.home() / ".prometheus")
-    default_embedding_model: str = "all-MiniLM-L6-v2"
+    base_dir: Path = field(
+        default_factory=lambda: Path(os.environ.get("PROMETHEUS_HOME", Path.home() / ".prometheus"))
+    )
+    default_embedding_model: str = field(
+        default_factory=lambda: os.environ.get("PROMETHEUS_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    )
 
     def __post_init__(self):
         self.base_dir = Path(self.base_dir)
@@ -21,10 +26,15 @@ class PrometheusConfig:
     def feedback_dir(self) -> Path:
         return self.base_dir / "feedback"
 
+    @property
+    def logs_dir(self) -> Path:
+        return self.base_dir / "logs"
+
     def ensure_dirs(self):
         """Create all required directories."""
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.feedback_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
     def model_path(self, model_name: str) -> Path:
         return self.models_dir / model_name

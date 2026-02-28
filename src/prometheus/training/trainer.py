@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import torch
@@ -39,6 +42,8 @@ class LevelMetrics:
     val_accuracy: float
     confusion_matrix: np.ndarray
     calibration: CalibrationResult | None = None
+    best_epoch: int | None = None
+    total_epochs: int | None = None
 
 
 @dataclass
@@ -111,6 +116,9 @@ def train_model(
         # Build confusion profile for noise injection in subsequent levels
         noise_injector.build_confusion_profile(depth, metrics.confusion_matrix)
 
+        logger.info("Level %s: val_acc=%.4f val_loss=%.4f best_epoch=%s/%s",
+                    level.name, metrics.val_accuracy, metrics.val_loss,
+                    metrics.best_epoch, metrics.total_epochs)
         _log(
             f"  Level {level.name}: val_acc={metrics.val_accuracy:.4f}, "
             f"val_loss={metrics.val_loss:.4f}"
@@ -156,9 +164,11 @@ def _train_level(
     best_val_loss = float("inf")
     patience_counter = 0
     best_state = None
+    best_epoch = 0
     train_loss = train_acc = val_loss = val_acc = 0.0
     all_preds: list[int] = []
     all_labels: list[int] = []
+    final_epoch = 0
 
     for epoch in range(config.epochs):
         # Training
@@ -215,15 +225,18 @@ def _train_level(
         val_acc = v_correct / v_total
 
         # Early stopping
+        final_epoch = epoch
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
+            best_epoch = epoch
             best_state = {k: v.cpu().clone() for k, v in classifier.state_dict().items()}
             all_preds = epoch_preds
             all_labels = epoch_labels
         else:
             patience_counter += 1
             if patience_counter >= config.early_stopping_patience:
+                logger.info("Early stopping at epoch %d for level %s", epoch, level_name)
                 break
 
     # Restore best model
@@ -243,4 +256,6 @@ def _train_level(
         val_loss=val_loss,
         val_accuracy=val_acc,
         confusion_matrix=cm,
+        best_epoch=best_epoch,
+        total_epochs=final_epoch + 1,
     )

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 import uuid
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import torch
@@ -113,6 +116,10 @@ class CascadePredictor:
                 }
                 for fc in routing.forked_completions
             ]
+
+        logger.info("prediction=%s routing=%s novel=%s path=%s",
+                    prediction_id, routing.decision.value, novelty.is_novel,
+                    cascade_result.path)
 
         return PredictionResult(
             prediction_id=prediction_id,

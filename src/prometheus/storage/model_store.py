@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import torch
@@ -27,6 +30,7 @@ class ModelManifest:
     embedding_dim: int
     created_at: str = ""
     artifacts: dict = field(default_factory=dict)
+    manifest_version: str = "1.0"
 
     def to_dict(self) -> dict:
         return {
@@ -38,6 +42,7 @@ class ModelManifest:
             "embedding_dim": self.embedding_dim,
             "created_at": self.created_at,
             "artifacts": self.artifacts,
+            "manifest_version": self.manifest_version,
         }
 
     @classmethod
@@ -51,6 +56,7 @@ class ModelManifest:
             embedding_dim=data["embedding_dim"],
             created_at=data.get("created_at", ""),
             artifacts=data.get("artifacts", {}),
+            manifest_version=data.get("manifest_version", "1.0"),
         )
 
 
@@ -163,6 +169,8 @@ def save_model(
     with open(path / "manifest.json", "w") as f:
         json.dump(manifest.to_dict(), f, indent=2)
 
+    logger.info("Model saved to %s (manifest_version=%s)", path, manifest.manifest_version)
+
 
 def load_model(
     path: Path,
@@ -177,6 +185,7 @@ def load_model(
     with open(path / "manifest.json") as f:
         manifest = ModelManifest.from_dict(json.load(f))
 
+    logger.info("Loading model from %s (manifest_version=%s)", path, manifest.manifest_version)
     taxonomy = manifest.taxonomy
 
     model = HierarchicalClassifier(

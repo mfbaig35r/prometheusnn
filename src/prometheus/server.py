@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +44,7 @@ from prometheus.storage.model_store import (
     load_code_mapping,
 )
 from prometheus.inference.summary import build_prediction_summary
+from prometheus.insights import build_training_insights, build_evaluation_insights, build_model_health
 
 mcp = FastMCP(
     "PrometheusNN",
@@ -211,6 +213,10 @@ Use this when deciding between models (e.g., different embedding models or hyper
 _config = PrometheusConfig()
 _config.ensure_dirs()
 
+from prometheus.core.logging import setup_logging
+setup_logging(_config.logs_dir)
+logger = logging.getLogger(__name__)
+
 # Cache loaded predictors: {model_name: CascadePredictor}
 _predictor_cache: dict[str, CascadePredictor] = {}
 
@@ -282,8 +288,10 @@ def analyze_training_data(
         level_columns: Ordered label columns root → leaf (e.g., ["Category", "SubCategory", "Type"])
     """
     try:
+        logger.info("tool=analyze_training_data file=%s levels=%s", file_path, level_columns)
         return success_response(analyze_data(file_path, text_column, level_columns))
     except Exception as e:
+        logger.error("analyze_training_data failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -323,6 +331,7 @@ def train_model(
         test_ratio: Proportion for test set
     """
     try:
+        logger.info("tool=train_model model=%s file=%s levels=%s epochs=%d", model_name, file_path, level_columns, epochs)
         hidden_dims = hidden_dims or [256, 64]
         progress_log = []
 
@@ -395,6 +404,12 @@ def train_model(
         # Invalidate cache
         _predictor_cache.pop(model_name, None)
 
+        # Build learning insights
+        try:
+            learning_insights = build_training_insights(result.level_metrics, taxonomy, train_data)
+        except Exception:
+            learning_insights = None
+
         return success_response({
             "model_name": model_name,
             "taxonomy": {
@@ -411,10 +426,12 @@ def train_model(
                 "val": len(val_data),
                 "test": len(test_data),
             },
+            "learning_insights": learning_insights,
             "warnings": warnings,
             "progress": progress_log,
         })
     except Exception as e:
+        logger.error("train_model failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
 
 
@@ -438,6 +455,7 @@ def resume_training(
         level_columns: Override level columns (uses original if None)
     """
     try:
+        logger.info("tool=resume_training model=%s epochs=%d lr=%f", model_name, additional_epochs, learning_rate)
         model_path = _config.model_path(model_name)
         model, manifest = load_model(model_path)
         taxonomy = manifest.taxonomy
@@ -524,6 +542,7 @@ def resume_training(
             "warnings": warnings,
         })
     except Exception as e:
+        logger.error("resume_training failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
 
 
@@ -588,6 +607,7 @@ def predict(
         beam_width: Beam width for search (1 = greedy)
     """
     try:
+        logger.info("tool=predict model=%s beam_width=%d", model_name, beam_width)
         predictor = _get_predictor(model_name)
         taxonomy = predictor.taxonomy
 
@@ -623,6 +643,7 @@ def predict(
 
         return success_response(response)
     except Exception as e:
+        logger.error("predict failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -644,6 +665,7 @@ def predict_batch(
         beam_width: Beam width for search (1 = greedy)
     """
     try:
+        logger.info("tool=predict_batch model=%s file=%s beam_width=%d", model_name, file_path, beam_width)
         predictor = _get_predictor(model_name)
         taxonomy = predictor.taxonomy
 
@@ -684,6 +706,7 @@ def predict_batch(
             "sample_predictions": rows[:5],
         })
     except Exception as e:
+        logger.error("predict_batch failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
 
 
@@ -701,6 +724,7 @@ def classify_with_context(
         known_levels: Dict of {level_name: known_value} for upper levels
     """
     try:
+        logger.info("tool=classify_with_context model=%s known=%s", model_name, list(known_levels.keys()))
         predictor = _get_predictor(model_name)
         taxonomy = predictor.taxonomy
 
@@ -745,6 +769,7 @@ def classify_with_context(
             "known_levels": known_levels,
         })
     except Exception as e:
+        logger.error("classify_with_context failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -755,6 +780,7 @@ def classify_with_context(
 def list_models() -> dict:
     """List all trained models with summary stats."""
     try:
+        logger.info("tool=list_models")
         models = []
         for name in _config.list_models():
             try:
@@ -773,6 +799,7 @@ def list_models() -> dict:
 
         return success_response({"models": models, "count": len(models)})
     except Exception as e:
+        logger.error("list_models failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -784,6 +811,7 @@ def describe_model(model_name: str) -> dict:
         model_name: Name of the model to describe
     """
     try:
+        logger.info("tool=describe_model model=%s", model_name)
         model_path = _config.model_path(model_name)
         if not (model_path / "manifest.json").exists():
             return validation_error(f"Model '{model_name}' not found")
@@ -791,8 +819,14 @@ def describe_model(model_name: str) -> dict:
         with open(model_path / "manifest.json") as f:
             manifest = json.load(f)
 
-        return success_response({"model_name": model_name, "manifest": manifest})
+        try:
+            model_health = build_model_health(manifest)
+        except Exception:
+            model_health = None
+
+        return success_response({"model_name": model_name, "manifest": manifest, "model_health": model_health})
     except Exception as e:
+        logger.error("describe_model failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -804,6 +838,7 @@ def delete_model(model_name: str) -> dict:
         model_name: Name of the model to delete
     """
     try:
+        logger.info("tool=delete_model model=%s", model_name)
         model_path = _config.model_path(model_name)
         if not model_path.exists():
             return validation_error(f"Model '{model_name}' not found")
@@ -813,6 +848,7 @@ def delete_model(model_name: str) -> dict:
 
         return success_response(None, f"Model '{model_name}' deleted")
     except Exception as e:
+        logger.error("delete_model failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -828,6 +864,7 @@ def export_model(
         output_path: Destination directory
     """
     try:
+        logger.info("tool=export_model model=%s dest=%s", model_name, output_path)
         import shutil
 
         model_path = _config.model_path(model_name)
@@ -841,6 +878,7 @@ def export_model(
         shutil.copytree(model_path, dest)
         return success_response({"exported_to": str(dest)})
     except Exception as e:
+        logger.error("export_model failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -866,6 +904,7 @@ def build_code_mapping(
         level_columns: Ordered label columns (defaults to model's taxonomy level names)
     """
     try:
+        logger.info("tool=build_code_mapping model=%s code_col=%s", model_name, code_column)
         model_path = _config.model_path(model_name)
         if not (model_path / "manifest.json").exists():
             return validation_error(f"Model '{model_name}' not found")
@@ -915,6 +954,7 @@ def build_code_mapping(
             "multi_code_paths": multi_code_paths,
         }, "Code mapping saved")
     except Exception as e:
+        logger.error("build_code_mapping failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
 
 
@@ -937,6 +977,7 @@ def evaluate_model(
         level_columns: Ordered label columns matching model's taxonomy
     """
     try:
+        logger.info("tool=evaluate_model model=%s file=%s", model_name, file_path)
         predictor = _get_predictor(model_name)
         taxonomy = predictor.taxonomy
 
@@ -969,13 +1010,30 @@ def evaluate_model(
             d = r.routing["decision"]
             routing_counts[d] = routing_counts.get(d, 0) + 1
 
+        # Build evaluation insights
+        try:
+            model_path = _config.model_path(model_name)
+            with open(model_path / "manifest.json") as f:
+                manifest = json.load(f)
+        except Exception:
+            manifest = None
+
+        try:
+            evaluation_insights = build_evaluation_insights(
+                level_accuracies, routing_counts, len(results), manifest,
+            )
+        except Exception:
+            evaluation_insights = None
+
         return success_response({
             "total_items": len(results),
             "per_level_accuracy": level_accuracies,
             "routing_distribution": routing_counts,
+            "evaluation_insights": evaluation_insights,
             "warnings": warnings,
         })
     except Exception as e:
+        logger.error("evaluate_model failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
 
 
@@ -991,6 +1049,7 @@ def explain_prediction(
         text: Text to explain
     """
     try:
+        logger.info("tool=explain_prediction model=%s", model_name)
         predictor = _get_predictor(model_name)
         taxonomy = predictor.taxonomy
 
@@ -1035,6 +1094,7 @@ def explain_prediction(
             },
         })
     except Exception as e:
+        logger.error("explain_prediction failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -1056,6 +1116,7 @@ def get_confusion_matrix(
         level_columns: Ordered label columns
     """
     try:
+        logger.info("tool=get_confusion_matrix model=%s level=%s", model_name, level)
         from sklearn.metrics import classification_report
 
         predictor = _get_predictor(model_name)
@@ -1084,6 +1145,7 @@ def get_confusion_matrix(
             "classification_report": report,
         })
     except Exception as e:
+        logger.error("get_confusion_matrix failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
 
 
@@ -1095,6 +1157,7 @@ def get_threshold_report(model_name: str) -> dict:
         model_name: Name of trained model
     """
     try:
+        logger.info("tool=get_threshold_report model=%s", model_name)
         model_path = _config.model_path(model_name)
         thresholds = load_thresholds(model_path)
 
@@ -1117,6 +1180,7 @@ def get_threshold_report(model_name: str) -> dict:
             "novelty_conf": thresholds.get("novelty_conf", 0.70),
         })
     except Exception as e:
+        logger.error("get_threshold_report failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -1132,6 +1196,7 @@ def set_thresholds(
         thresholds: Dict of threshold overrides. Keys can be level names, depth indices, "margin", "z_score", "novelty_conf", "adaptive_factor" (int, beam widening multiplier, default 2).
     """
     try:
+        logger.info("tool=set_thresholds model=%s overrides=%s", model_name, list(thresholds.keys()))
         model_path = _config.model_path(model_name)
         current = load_thresholds(model_path)
 
@@ -1161,6 +1226,7 @@ def set_thresholds(
             "thresholds": {str(k): v for k, v in current.items()},
         }, "Thresholds updated")
     except Exception as e:
+        logger.error("set_thresholds failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
@@ -1183,6 +1249,7 @@ def submit_feedback(
         prediction_id: Optional prediction ID to link feedback to
     """
     try:
+        logger.info("tool=submit_feedback model=%s prediction_id=%s", model_name, prediction_id)
         feedback_dir = _config.feedback_dir / model_name
         feedback_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1201,6 +1268,7 @@ def submit_feedback(
 
         return success_response(None, "Feedback recorded")
     except Exception as e:
+        logger.error("submit_feedback failed: %s", e, exc_info=True)
         return internal_error(str(e))
 
 
