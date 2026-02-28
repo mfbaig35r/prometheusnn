@@ -15,11 +15,12 @@ import pytest
 
 import prometheus.server as server
 from prometheus.core.config import PrometheusConfig
-from prometheus.data.taxonomy import TaxonomyInfo
 from prometheus.data.splits import DataSplit
-from prometheus.training.trainer import train_model as run_training, TrainingConfig
+from prometheus.data.taxonomy import TaxonomyInfo
 from prometheus.inference.novelty import NoveltyDetector
-from prometheus.storage.model_store import save_model, generate_thresholds
+from prometheus.storage.model_store import save_model
+from prometheus.training.trainer import TrainingConfig
+from prometheus.training.trainer import train_model as run_training
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "naics_test.csv"
 TEXT_COL = "description"
@@ -75,7 +76,7 @@ def _trained_artifacts():
     def _split(i):
         return DataSplit(
             embeddings=embeddings[i],
-            labels_by_depth={d: l[i] for d, l in labels_by_depth.items()},
+            labels_by_depth={d: lbls[i] for d, lbls in labels_by_depth.items()},
             texts=[df[TEXT_COL].iloc[j] for j in i],
         )
 
@@ -83,8 +84,11 @@ def _trained_artifacts():
 
     config = TrainingConfig(epochs=3, batch_size=64, hidden_dims=[64, 32], dropout=0.2)
     model, result, noise = run_training(
-        taxonomy=taxonomy, train_data=train, val_data=val,
-        embedding_dim=EMBED_DIM, config=config,
+        taxonomy=taxonomy,
+        train_data=train,
+        val_data=val,
+        embedding_dim=EMBED_DIM,
+        config=config,
     )
 
     novelty = NoveltyDetector()

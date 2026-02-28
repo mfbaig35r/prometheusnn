@@ -1,6 +1,7 @@
 """Tests for temperature calibration."""
 
 import numpy as np
+
 from prometheus.training.calibration import compute_ece, find_optimal_temperature
 
 

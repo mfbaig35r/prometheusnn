@@ -8,6 +8,7 @@ from pathlib import Path
 @dataclass
 class PrometheusConfig:
     """Global configuration for Prometheus."""
+
     base_dir: Path = field(
         default_factory=lambda: Path(os.environ.get("PROMETHEUS_HOME", Path.home() / ".prometheus"))
     )
@@ -44,6 +45,7 @@ class PrometheusConfig:
         if not self.models_dir.exists():
             return []
         return sorted(
-            d.name for d in self.models_dir.iterdir()
+            d.name
+            for d in self.models_dir.iterdir()
             if d.is_dir() and (d / "manifest.json").exists()
         )

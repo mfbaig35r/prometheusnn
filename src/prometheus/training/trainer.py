@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
-
-logger = logging.getLogger(__name__)
 
 import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.metrics import confusion_matrix as sk_confusion_matrix
 
+from prometheus.data.splits import BatchIterator, DataSplit
 from prometheus.data.taxonomy import TaxonomyInfo
-from prometheus.data.splits import DataSplit, BatchIterator
+from prometheus.training.calibration import CalibrationResult, TemperatureScaler
 from prometheus.training.cascade import HierarchicalClassifier
 from prometheus.training.noise import ParentNoiseInjector
-from prometheus.training.calibration import TemperatureScaler, CalibrationResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -57,7 +57,9 @@ class TrainingResult:
                 "train_acc": round(lm.train_accuracy, 4),
                 "val_acc": round(lm.val_accuracy, 4),
                 "val_loss": round(lm.val_loss, 4),
-                "calibration_temp": round(lm.calibration.temperature, 3) if lm.calibration else None,
+                "calibration_temp": round(lm.calibration.temperature, 3)
+                if lm.calibration
+                else None,
             }
             for lm in self.level_metrics
         }
@@ -116,9 +118,14 @@ def train_model(
         # Build confusion profile for noise injection in subsequent levels
         noise_injector.build_confusion_profile(depth, metrics.confusion_matrix)
 
-        logger.info("Level %s: val_acc=%.4f val_loss=%.4f best_epoch=%s/%s",
-                    level.name, metrics.val_accuracy, metrics.val_loss,
-                    metrics.best_epoch, metrics.total_epochs)
+        logger.info(
+            "Level %s: val_acc=%.4f val_loss=%.4f best_epoch=%s/%s",
+            level.name,
+            metrics.val_accuracy,
+            metrics.val_loss,
+            metrics.best_epoch,
+            metrics.total_epochs,
+        )
         _log(
             f"  Level {level.name}: val_acc={metrics.val_accuracy:.4f}, "
             f"val_loss={metrics.val_loss:.4f}"
@@ -244,9 +251,7 @@ def _train_level(
         classifier.load_state_dict(best_state)
         classifier.to(device)
 
-    cm = sk_confusion_matrix(
-        all_labels, all_preds, labels=list(range(num_classes[depth]))
-    )
+    cm = sk_confusion_matrix(all_labels, all_preds, labels=list(range(num_classes[depth])))
 
     return LevelMetrics(
         depth=depth,

@@ -1,8 +1,9 @@
 """Tests for novelty detection."""
 
-import numpy as np
 import tempfile
 from pathlib import Path
+
+import numpy as np
 
 from prometheus.inference.novelty import NoveltyDetector
 

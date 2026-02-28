@@ -23,9 +23,7 @@ class ParentNoiseInjector:
     def set_confusion_profile(self, depth: int, profile: dict[int, dict[int, int]]):
         self.confusion_profiles[depth] = profile
 
-    def build_confusion_profile(
-        self, depth: int, cm: np.ndarray
-    ) -> dict[int, dict[int, int]]:
+    def build_confusion_profile(self, depth: int, cm: np.ndarray) -> dict[int, dict[int, int]]:
         """Build and store a confusion profile from a confusion matrix."""
         profile: dict[int, dict[int, int]] = {}
         num_classes = cm.shape[0]
@@ -60,11 +58,7 @@ class ParentNoiseInjector:
         for depth in parent_depths:
             labels = torch.tensor(batch[depth], dtype=torch.long, device=device)
 
-            if (
-                training
-                and depth in self.confusion_profiles
-                and self.noise_rate > 0
-            ):
+            if training and depth in self.confusion_profiles and self.noise_rate > 0:
                 labels = self._inject_noise(labels, depth, device)
 
             one_hot = F.one_hot(labels, num_classes=num_classes_per_level[depth]).float()
@@ -72,9 +66,7 @@ class ParentNoiseInjector:
 
         return torch.cat(context_parts, dim=-1)
 
-    def _inject_noise(
-        self, labels: torch.Tensor, depth: int, device: torch.device
-    ) -> torch.Tensor:
+    def _inject_noise(self, labels: torch.Tensor, depth: int, device: torch.device) -> torch.Tensor:
         profile = self.confusion_profiles[depth]
         noisy = labels.clone()
         mask = torch.rand(len(labels), device=device) < self.noise_rate
@@ -104,6 +96,5 @@ class ParentNoiseInjector:
     def load_profiles(self, data: dict):
         """Load confusion profiles from deserialized JSON."""
         self.confusion_profiles = {
-            int(depth): {int(k): v for k, v in profile.items()}
-            for depth, profile in data.items()
+            int(depth): {int(k): v for k, v in profile.items()} for depth, profile in data.items()
         }

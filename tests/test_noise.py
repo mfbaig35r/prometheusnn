@@ -2,17 +2,20 @@
 
 import numpy as np
 import torch
+
 from prometheus.training.noise import ParentNoiseInjector
 
 
 def test_build_confusion_profile():
     injector = ParentNoiseInjector(noise_rate=0.2)
     # 3-class confusion matrix
-    cm = np.array([
-        [8, 1, 1],
-        [2, 7, 1],
-        [0, 1, 9],
-    ])
+    cm = np.array(
+        [
+            [8, 1, 1],
+            [2, 7, 1],
+            [0, 1, 9],
+        ]
+    )
     profile = injector.build_confusion_profile(0, cm)
 
     assert 0 in profile  # class 0 confused with 1 and 2
@@ -27,8 +30,11 @@ def test_noisy_context_no_noise_when_not_training():
 
     batch = {0: np.array([0, 1, 0, 1])}
     ctx = injector.build_noisy_context(
-        batch, parent_depths=[0], num_classes_per_level=[2],
-        device=torch.device("cpu"), training=False
+        batch,
+        parent_depths=[0],
+        num_classes_per_level=[2],
+        device=torch.device("cpu"),
+        training=False,
     )
 
     # Should be exact one-hot of true labels

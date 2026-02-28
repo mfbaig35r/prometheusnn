@@ -6,7 +6,6 @@ import threading
 
 import numpy as np
 
-
 _lock = threading.Lock()
 _models: dict[str, object] = {}
 
@@ -17,6 +16,7 @@ def get_embedding_model(model_name: str):
         with _lock:
             if model_name not in _models:
                 from sentence_transformers import SentenceTransformer
+
                 _models[model_name] = SentenceTransformer(model_name)
     return _models[model_name]
 

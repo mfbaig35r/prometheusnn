@@ -2,7 +2,7 @@
 
 from prometheus.inference.beam_search import CascadePrediction, LevelPrediction
 from prometheus.inference.novelty import NoveltyScore
-from prometheus.inference.router import ThresholdRouter, RoutingDecision
+from prometheus.inference.router import RoutingDecision, ThresholdRouter
 
 
 def _make_prediction(confs, margins=None):
@@ -13,8 +13,12 @@ def _make_prediction(confs, margins=None):
 
     lps = [
         LevelPrediction(
-            depth=i, name=names[i], predicted=classes[i],
-            predicted_idx=i, confidence=confs[i], margin=margins[i],
+            depth=i,
+            name=names[i],
+            predicted=classes[i],
+            predicted_idx=i,
+            confidence=confs[i],
+            margin=margins[i],
             top_candidates=[],
         )
         for i in range(len(confs))

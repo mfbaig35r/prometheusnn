@@ -27,16 +27,18 @@ class HierarchicalClassifier(nn.Module):
         self.num_classes_per_level = list(num_classes_per_level)
         hidden_dims = hidden_dims or [256, 64]
 
-        self.classifiers = nn.ModuleList([
-            LevelClassifier(
-                embedding_dim=embedding_dim,
-                num_classes=num_classes_per_level[i],
-                parent_dims=num_classes_per_level[:i],
-                hidden_dims=hidden_dims,
-                dropout=dropout,
-            )
-            for i in range(len(num_classes_per_level))
-        ])
+        self.classifiers = nn.ModuleList(
+            [
+                LevelClassifier(
+                    embedding_dim=embedding_dim,
+                    num_classes=num_classes_per_level[i],
+                    parent_dims=num_classes_per_level[:i],
+                    hidden_dims=hidden_dims,
+                    dropout=dropout,
+                )
+                for i in range(len(num_classes_per_level))
+            ]
+        )
 
     @property
     def num_levels(self) -> int:
@@ -58,9 +60,7 @@ class HierarchicalClassifier(nn.Module):
         path = Path(path)
         names = level_names or [str(i) for i in range(self.num_levels)]
         for i, (clf, name) in enumerate(zip(self.classifiers, names)):
-            clf.load_state_dict(
-                torch.load(path / f"level_{i}_{name}.pt", weights_only=True)
-            )
+            clf.load_state_dict(torch.load(path / f"level_{i}_{name}.pt", weights_only=True))
 
 
 def build_parent_context(
@@ -73,7 +73,6 @@ def build_parent_context(
     if not parent_depths:
         return None
 
-    batch_size = predictions[parent_depths[0]].shape[0]
     if device is None:
         device = predictions[parent_depths[0]].device
 

@@ -5,46 +5,45 @@ from __future__ import annotations
 import json
 import logging
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import torch
 from mcp.server.fastmcp import FastMCP
 
 from prometheus.core.config import PrometheusConfig
-from prometheus.core.responses import success_response, internal_error, validation_error
-from prometheus.core.embedding import encode_texts, get_embedding_dim
-from prometheus.data.taxonomy import TaxonomyInfo
+from prometheus.core.embedding import encode_texts
+from prometheus.core.logging import setup_logging
+from prometheus.core.responses import internal_error, success_response, validation_error
 from prometheus.data.loader import (
-    load_dataframe,
-    validate_columns,
-    check_hierarchy_consistency,
     analyze_data,
+    load_dataframe,
     prepare_data,
+    validate_columns,
 )
-from prometheus.data.splits import DataSplit
-from prometheus.training.cascade import HierarchicalClassifier
-from prometheus.training.trainer import train_model as run_training, TrainingConfig
-from prometheus.training.noise import ParentNoiseInjector
-from prometheus.training.calibration import TemperatureScaler
-from prometheus.inference.beam_search import BeamSearchClassifier, GreedyClassifier
 from prometheus.inference.novelty import NoveltyDetector
-from prometheus.inference.router import ThresholdRouter
 from prometheus.inference.predictor import CascadePredictor
+from prometheus.inference.router import ThresholdRouter
+from prometheus.inference.summary import build_prediction_summary
+from prometheus.insights import (
+    build_evaluation_insights,
+    build_model_health,
+    build_training_insights,
+)
 from prometheus.storage.model_store import (
-    save_model,
+    delete_model as delete_model_from_disk,
+)
+from prometheus.storage.model_store import (
+    load_code_mapping,
     load_model,
     load_thresholds,
-    delete_model as delete_model_from_disk,
-    generate_thresholds,
-    ModelManifest,
     save_code_mapping,
-    load_code_mapping,
+    save_model,
 )
-from prometheus.inference.summary import build_prediction_summary
-from prometheus.insights import build_training_insights, build_evaluation_insights, build_model_health
+from prometheus.training.noise import ParentNoiseInjector
+from prometheus.training.trainer import TrainingConfig
+from prometheus.training.trainer import train_model as run_training
 
 mcp = FastMCP(
     "PrometheusNN",
@@ -212,8 +211,6 @@ Use this when deciding between models (e.g., different embedding models or hyper
 
 _config = PrometheusConfig()
 _config.ensure_dirs()
-
-from prometheus.core.logging import setup_logging
 setup_logging(_config.logs_dir)
 logger = logging.getLogger(__name__)
 
@@ -331,7 +328,13 @@ def train_model(
         test_ratio: Proportion for test set
     """
     try:
-        logger.info("tool=train_model model=%s file=%s levels=%s epochs=%d", model_name, file_path, level_columns, epochs)
+        logger.info(
+            "tool=train_model model=%s file=%s levels=%s epochs=%d",
+            model_name,
+            file_path,
+            level_columns,
+            epochs,
+        )
         hidden_dims = hidden_dims or [256, 64]
         progress_log = []
 
@@ -352,7 +355,9 @@ def train_model(
         )
 
         embedding_dim = train_data.embeddings.shape[1]
-        log(f"Data: {taxonomy.total_samples} samples, {taxonomy.num_levels} levels, {embedding_dim}d embeddings")
+        log(
+            f"Data: {taxonomy.total_samples} samples, {taxonomy.num_levels} levels, {embedding_dim}d embeddings"
+        )
 
         # Train
         config = TrainingConfig(
@@ -410,26 +415,28 @@ def train_model(
         except Exception:
             learning_insights = None
 
-        return success_response({
-            "model_name": model_name,
-            "taxonomy": {
-                "num_levels": taxonomy.num_levels,
-                "levels": [
-                    {"name": l.name, "num_classes": l.num_classes}
-                    for l in taxonomy.levels
-                ],
-                "total_samples": taxonomy.total_samples,
-            },
-            "metrics": result.summary(),
-            "splits": {
-                "train": len(train_data),
-                "val": len(val_data),
-                "test": len(test_data),
-            },
-            "learning_insights": learning_insights,
-            "warnings": warnings,
-            "progress": progress_log,
-        })
+        return success_response(
+            {
+                "model_name": model_name,
+                "taxonomy": {
+                    "num_levels": taxonomy.num_levels,
+                    "levels": [
+                        {"name": lvl.name, "num_classes": lvl.num_classes}
+                        for lvl in taxonomy.levels
+                    ],
+                    "total_samples": taxonomy.total_samples,
+                },
+                "metrics": result.summary(),
+                "splits": {
+                    "train": len(train_data),
+                    "val": len(val_data),
+                    "test": len(test_data),
+                },
+                "learning_insights": learning_insights,
+                "warnings": warnings,
+                "progress": progress_log,
+            }
+        )
     except Exception as e:
         logger.error("train_model failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
@@ -455,7 +462,12 @@ def resume_training(
         level_columns: Override level columns (uses original if None)
     """
     try:
-        logger.info("tool=resume_training model=%s epochs=%d lr=%f", model_name, additional_epochs, learning_rate)
+        logger.info(
+            "tool=resume_training model=%s epochs=%d lr=%f",
+            model_name,
+            additional_epochs,
+            learning_rate,
+        )
         model_path = _config.model_path(model_name)
         model, manifest = load_model(model_path)
         taxonomy = manifest.taxonomy
@@ -486,8 +498,8 @@ def resume_training(
             with open(model_path / "confusion_profiles.json") as f:
                 noise_injector.load_profiles(json.load(f))
 
-        from prometheus.training.trainer import _train_level, TrainingResult
-        from prometheus.training.calibration import TemperatureScaler, CalibrationResult
+        from prometheus.training.calibration import TemperatureScaler
+        from prometheus.training.trainer import TrainingResult, _train_level
 
         # Build HierarchicalClassifier wrapper around loaded model
         embedding_dim = manifest.embedding_dim
@@ -535,12 +547,14 @@ def resume_training(
 
         _predictor_cache.pop(model_name, None)
 
-        return success_response({
-            "model_name": model_name,
-            "additional_epochs": additional_epochs,
-            "metrics": result.summary(),
-            "warnings": warnings,
-        })
+        return success_response(
+            {
+                "model_name": model_name,
+                "additional_epochs": additional_epochs,
+                "metrics": result.summary(),
+                "warnings": warnings,
+            }
+        )
     except Exception as e:
         logger.error("resume_training failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
@@ -553,8 +567,6 @@ def _analyze_forks(result) -> list[str]:
         return insights
 
     best_leaf_conf = result.predictions[-1]["confidence"]
-    best_leaf_label = result.path[-1]
-    best_l1 = result.forked_completions[0]["suffix"][0]
 
     # 1. Minority branch with higher leaf confidence
     for fc in result.forked_completions[1:]:
@@ -563,8 +575,8 @@ def _analyze_forks(result) -> list[str]:
         fork_l1 = fc["suffix"][0]
         if fork_leaf_conf > best_leaf_conf + 0.05:
             insights.append(
-                f"Alternative path via \"{fork_l1}\" has higher leaf confidence "
-                f"for \"{fork_leaf_label}\" ({fork_leaf_conf:.0%} vs {best_leaf_conf:.0%})"
+                f'Alternative path via "{fork_l1}" has higher leaf confidence '
+                f'for "{fork_leaf_label}" ({fork_leaf_conf:.0%} vs {best_leaf_conf:.0%})'
             )
 
     # 2. Multiple branches converge on same leaf label
@@ -576,9 +588,7 @@ def _analyze_forks(result) -> list[str]:
     for leaf, branches in leaf_to_branches.items():
         if len(branches) >= 2:
             branch_str = " and ".join(f'"{b}"' for b in branches)
-            insights.append(
-                f"Multiple branches ({branch_str}) converge on \"{leaf}\""
-            )
+            insights.append(f'Multiple branches ({branch_str}) converge on "{leaf}"')
 
     # 3. Best path leaf confidence is very low
     if best_leaf_conf < 0.3 and not any("higher leaf" in i for i in insights):
@@ -613,7 +623,9 @@ def predict(
 
         embedding = encode_texts([text], taxonomy.embedding_model, show_progress=False)[0]
         result = predictor.predict(
-            embedding, text=text, use_beam_search=(beam_width > 1),
+            embedding,
+            text=text,
+            use_beam_search=(beam_width > 1),
             beam_width=beam_width if beam_width > 1 else None,
         )
 
@@ -665,7 +677,12 @@ def predict_batch(
         beam_width: Beam width for search (1 = greedy)
     """
     try:
-        logger.info("tool=predict_batch model=%s file=%s beam_width=%d", model_name, file_path, beam_width)
+        logger.info(
+            "tool=predict_batch model=%s file=%s beam_width=%d",
+            model_name,
+            file_path,
+            beam_width,
+        )
         predictor = _get_predictor(model_name)
         taxonomy = predictor.taxonomy
 
@@ -677,7 +694,9 @@ def predict_batch(
         embeddings = encode_texts(texts, taxonomy.embedding_model)
 
         results = predictor.predict_batch(
-            embeddings, texts=texts, use_beam_search=(beam_width > 1),
+            embeddings,
+            texts=texts,
+            use_beam_search=(beam_width > 1),
             beam_width=beam_width if beam_width > 1 else None,
         )
 
@@ -699,12 +718,14 @@ def predict_batch(
 
         routing_counts = out_df["routing"].value_counts().to_dict()
 
-        return success_response({
-            "total_items": len(results),
-            "routing_distribution": routing_counts,
-            "output_path": output_path,
-            "sample_predictions": rows[:5],
-        })
+        return success_response(
+            {
+                "total_items": len(results),
+                "routing_distribution": routing_counts,
+                "output_path": output_path,
+                "sample_predictions": rows[:5],
+            }
+        )
     except Exception as e:
         logger.error("predict_batch failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
@@ -724,7 +745,11 @@ def classify_with_context(
         known_levels: Dict of {level_name: known_value} for upper levels
     """
     try:
-        logger.info("tool=classify_with_context model=%s known=%s", model_name, list(known_levels.keys()))
+        logger.info(
+            "tool=classify_with_context model=%s known=%s",
+            model_name,
+            list(known_levels.keys()),
+        )
         predictor = _get_predictor(model_name)
         taxonomy = predictor.taxonomy
 
@@ -763,11 +788,13 @@ def classify_with_context(
                 one_hot[0, pred_idx] = 1.0
                 context_parts.append(one_hot)
 
-        return success_response({
-            "path": path_labels,
-            "confidences": [round(c, 4) for c in path_confs],
-            "known_levels": known_levels,
-        })
+        return success_response(
+            {
+                "path": path_labels,
+                "confidences": [round(c, 4) for c in path_confs],
+                "known_levels": known_levels,
+            }
+        )
     except Exception as e:
         logger.error("classify_with_context failed: %s", e, exc_info=True)
         return internal_error(str(e))
@@ -786,14 +813,16 @@ def list_models() -> dict:
             try:
                 with open(_config.model_path(name) / "manifest.json") as f:
                     manifest = json.load(f)
-                models.append({
-                    "name": name,
-                    "num_levels": len(manifest["taxonomy"]["levels"]),
-                    "level_names": [l["name"] for l in manifest["taxonomy"]["levels"]],
-                    "total_samples": manifest["taxonomy"].get("total_samples", 0),
-                    "embedding_model": manifest["taxonomy"]["embedding_model"],
-                    "created_at": manifest.get("created_at", "unknown"),
-                })
+                models.append(
+                    {
+                        "name": name,
+                        "num_levels": len(manifest["taxonomy"]["levels"]),
+                        "level_names": [lvl["name"] for lvl in manifest["taxonomy"]["levels"]],
+                        "total_samples": manifest["taxonomy"].get("total_samples", 0),
+                        "embedding_model": manifest["taxonomy"]["embedding_model"],
+                        "created_at": manifest.get("created_at", "unknown"),
+                    }
+                )
             except Exception:
                 models.append({"name": name, "error": "Failed to read manifest"})
 
@@ -824,7 +853,13 @@ def describe_model(model_name: str) -> dict:
         except Exception:
             model_health = None
 
-        return success_response({"model_name": model_name, "manifest": manifest, "model_health": model_health})
+        return success_response(
+            {
+                "model_name": model_name,
+                "manifest": manifest,
+                "model_health": model_health,
+            }
+        )
     except Exception as e:
         logger.error("describe_model failed: %s", e, exc_info=True)
         return internal_error(str(e))
@@ -912,7 +947,7 @@ def build_code_mapping(
         with open(model_path / "manifest.json") as f:
             manifest = json.load(f)
 
-        taxonomy_levels = [l["name"] for l in manifest["taxonomy"]["levels"]]
+        taxonomy_levels = [lvl["name"] for lvl in manifest["taxonomy"]["levels"]]
         cols = level_columns or taxonomy_levels
 
         df = load_dataframe(file_path)
@@ -945,14 +980,17 @@ def build_code_mapping(
         for codes in mapping.values():
             all_codes.update(codes)
 
-        return success_response({
-            "model_name": model_name,
-            "code_column": code_column,
-            "level_columns": cols,
-            "unique_paths": len(mapping),
-            "unique_codes": len(all_codes),
-            "multi_code_paths": multi_code_paths,
-        }, "Code mapping saved")
+        return success_response(
+            {
+                "model_name": model_name,
+                "code_column": code_column,
+                "level_columns": cols,
+                "unique_paths": len(mapping),
+                "unique_codes": len(all_codes),
+                "multi_code_paths": multi_code_paths,
+            },
+            "Code mapping saved",
+        )
     except Exception as e:
         logger.error("build_code_mapping failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
@@ -1020,18 +1058,23 @@ def evaluate_model(
 
         try:
             evaluation_insights = build_evaluation_insights(
-                level_accuracies, routing_counts, len(results), manifest,
+                level_accuracies,
+                routing_counts,
+                len(results),
+                manifest,
             )
         except Exception:
             evaluation_insights = None
 
-        return success_response({
-            "total_items": len(results),
-            "per_level_accuracy": level_accuracies,
-            "routing_distribution": routing_counts,
-            "evaluation_insights": evaluation_insights,
-            "warnings": warnings,
-        })
+        return success_response(
+            {
+                "total_items": len(results),
+                "per_level_accuracy": level_accuracies,
+                "routing_distribution": routing_counts,
+                "evaluation_insights": evaluation_insights,
+                "warnings": warnings,
+            }
+        )
     except Exception as e:
         logger.error("evaluate_model failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
@@ -1063,36 +1106,38 @@ def explain_prediction(
         min_conf = min(lp.confidence for lp in beam_result.level_predictions)
         novelty = predictor.novelty_detector.score(embedding, leaf_pred.predicted, min_conf)
 
-        return success_response({
-            "text": text,
-            "best_path": beam_result.path,
-            "path_score": round(beam_result.path_score, 4),
-            "level_details": [
-                {
-                    "depth": lp.depth,
-                    "level": lp.name,
-                    "predicted": lp.predicted,
-                    "confidence": round(lp.confidence, 4),
-                    "margin": round(lp.margin, 4),
-                    "top_candidates": lp.top_candidates,
-                }
-                for lp in beam_result.level_predictions
-            ],
-            "alternative_paths": [
-                {
-                    "path": bp.labels,
-                    "score": round(bp.log_score, 4),
-                    "probs": [round(p, 4) for p in bp.probs],
-                }
-                for bp in beam_result.alternative_paths
-            ],
-            "novelty": {
-                "centroid_distance": round(novelty.centroid_distance, 4),
-                "centroid_z_score": round(novelty.centroid_z_score, 4),
-                "knn_distance": round(novelty.knn_distance, 4),
-                "is_novel": novelty.is_novel,
-            },
-        })
+        return success_response(
+            {
+                "text": text,
+                "best_path": beam_result.path,
+                "path_score": round(beam_result.path_score, 4),
+                "level_details": [
+                    {
+                        "depth": lp.depth,
+                        "level": lp.name,
+                        "predicted": lp.predicted,
+                        "confidence": round(lp.confidence, 4),
+                        "margin": round(lp.margin, 4),
+                        "top_candidates": lp.top_candidates,
+                    }
+                    for lp in beam_result.level_predictions
+                ],
+                "alternative_paths": [
+                    {
+                        "path": bp.labels,
+                        "score": round(bp.log_score, 4),
+                        "probs": [round(p, 4) for p in bp.probs],
+                    }
+                    for bp in beam_result.alternative_paths
+                ],
+                "novelty": {
+                    "centroid_distance": round(novelty.centroid_distance, 4),
+                    "centroid_z_score": round(novelty.centroid_z_score, 4),
+                    "knn_distance": round(novelty.knn_distance, 4),
+                    "is_novel": novelty.is_novel,
+                },
+            }
+        )
     except Exception as e:
         logger.error("explain_prediction failed: %s", e, exc_info=True)
         return internal_error(str(e))
@@ -1139,11 +1184,13 @@ def get_confusion_matrix(
 
         report = classification_report(true_labels, pred_labels, output_dict=True, zero_division=0)
 
-        return success_response({
-            "level": level,
-            "depth": depth,
-            "classification_report": report,
-        })
+        return success_response(
+            {
+                "level": level,
+                "depth": depth,
+                "classification_report": report,
+            }
+        )
     except Exception as e:
         logger.error("get_confusion_matrix failed: %s", e, exc_info=True)
         return internal_error(str(e), traceback.format_exc())
@@ -1172,13 +1219,15 @@ def get_threshold_report(model_name: str) -> dict:
                 "threshold": thresholds.get(depth, 0.75),
             }
 
-        return success_response({
-            "model_name": model_name,
-            "per_level_thresholds": per_level,
-            "margin": thresholds.get("margin", 0.15),
-            "z_score": thresholds.get("z_score", 2.5),
-            "novelty_conf": thresholds.get("novelty_conf", 0.70),
-        })
+        return success_response(
+            {
+                "model_name": model_name,
+                "per_level_thresholds": per_level,
+                "margin": thresholds.get("margin", 0.15),
+                "z_score": thresholds.get("z_score", 2.5),
+                "novelty_conf": thresholds.get("novelty_conf", 0.70),
+            }
+        )
     except Exception as e:
         logger.error("get_threshold_report failed: %s", e, exc_info=True)
         return internal_error(str(e))
@@ -1196,7 +1245,11 @@ def set_thresholds(
         thresholds: Dict of threshold overrides. Keys can be level names, depth indices, "margin", "z_score", "novelty_conf", "adaptive_factor" (int, beam widening multiplier, default 2).
     """
     try:
-        logger.info("tool=set_thresholds model=%s overrides=%s", model_name, list(thresholds.keys()))
+        logger.info(
+            "tool=set_thresholds model=%s overrides=%s",
+            model_name,
+            list(thresholds.keys()),
+        )
         model_path = _config.model_path(model_name)
         current = load_thresholds(model_path)
 
@@ -1221,10 +1274,13 @@ def set_thresholds(
 
         _predictor_cache.pop(model_name, None)
 
-        return success_response({
-            "model_name": model_name,
-            "thresholds": {str(k): v for k, v in current.items()},
-        }, "Thresholds updated")
+        return success_response(
+            {
+                "model_name": model_name,
+                "thresholds": {str(k): v for k, v in current.items()},
+            },
+            "Thresholds updated",
+        )
     except Exception as e:
         logger.error("set_thresholds failed: %s", e, exc_info=True)
         return internal_error(str(e))
@@ -1254,7 +1310,7 @@ def submit_feedback(
         feedback_dir.mkdir(parents=True, exist_ok=True)
 
         entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "model_name": model_name,
             "text": text,
             "corrected_labels": corrected_labels,
@@ -1281,8 +1337,18 @@ def list_embedding_models() -> dict:
     models = [
         {"name": "all-MiniLM-L6-v2", "dim": 384, "speed": "fast", "quality": "good"},
         {"name": "all-mpnet-base-v2", "dim": 768, "speed": "medium", "quality": "best"},
-        {"name": "paraphrase-MiniLM-L3-v2", "dim": 384, "speed": "fastest", "quality": "fair"},
-        {"name": "all-MiniLM-L12-v2", "dim": 384, "speed": "medium", "quality": "better"},
+        {
+            "name": "paraphrase-MiniLM-L3-v2",
+            "dim": 384,
+            "speed": "fastest",
+            "quality": "fair",
+        },
+        {
+            "name": "all-MiniLM-L12-v2",
+            "dim": 384,
+            "speed": "medium",
+            "quality": "better",
+        },
     ]
     return success_response({"models": models})
 

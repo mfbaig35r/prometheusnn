@@ -26,9 +26,23 @@ packages = ["src/prometheus"]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
 
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "B905",    # zip() strict= — internal iterables, lengths always match
+    "SIM102",  # nested ifs — often more readable than combined
+    "E501",    # line length — handled by formatter for code; docstrings exempt
+]
+
 [dependency-groups]
 dev = [
     "duckdb>=1.4.4",
     "openpyxl>=3.1.5",
     "pytest>=9.0.2",
+    "ruff>=0.9.0",
 ]

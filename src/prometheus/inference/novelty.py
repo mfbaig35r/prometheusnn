@@ -62,13 +62,13 @@ class NoveltyDetector:
                 centroid=centroid,
                 mean_dist=float(distances.mean()),
                 std_dist=max(float(distances.std()), 0.1) if len(distances) > 1 else 1.0,
-                p95_dist=float(np.percentile(distances, 95)) if len(distances) > 1 else float(distances.max()),
+                p95_dist=float(np.percentile(distances, 95))
+                if len(distances) > 1
+                else float(distances.max()),
                 count=int(mask.sum()),
             )
 
-    def score(
-        self, embedding: np.ndarray, predicted_leaf: str, confidence: float
-    ) -> NoveltyScore:
+    def score(self, embedding: np.ndarray, predicted_leaf: str, confidence: float) -> NoveltyScore:
         if predicted_leaf in self.centroids:
             info = self.centroids[predicted_leaf]
             dist = float(np.linalg.norm(embedding - info.centroid))
@@ -101,7 +101,9 @@ class NoveltyDetector:
 
         np.savez(
             path / "novelty_centroids.npz",
-            **{f"centroid_{i}": info.centroid for i, (_, info) in enumerate(self.centroids.items())},
+            **{
+                f"centroid_{i}": info.centroid for i, (_, info) in enumerate(self.centroids.items())
+            },
             class_names=list(self.centroids.keys()),
             mean_dists=[info.mean_dist for info in self.centroids.values()],
             std_dists=[info.std_dist for info in self.centroids.values()],
@@ -138,8 +140,7 @@ class NoveltyDetector:
     def get_centroids_data(self) -> dict:
         """Return data dict suitable for np.savez."""
         data = {
-            f"centroid_{i}": info.centroid
-            for i, (_, info) in enumerate(self.centroids.items())
+            f"centroid_{i}": info.centroid for i, (_, info) in enumerate(self.centroids.items())
         }
         data["class_names"] = list(self.centroids.keys())
         data["mean_dists"] = [info.mean_dist for info in self.centroids.values()]

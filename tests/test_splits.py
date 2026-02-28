@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from prometheus.data.splits import DataSplit, BatchIterator
+from prometheus.data.splits import BatchIterator
 
 
 def test_datasplit_basics(small_datasplit):
@@ -39,6 +39,4 @@ def test_batch_iterator_no_shuffle(small_datasplit):
     it = BatchIterator(small_datasplit, batch_size=5, shuffle=False)
     batches = list(it)
     assert len(batches) == 4
-    np.testing.assert_array_equal(
-        batches[0]["embeddings"], small_datasplit.embeddings[:5]
-    )
+    np.testing.assert_array_equal(batches[0]["embeddings"], small_datasplit.embeddings[:5])

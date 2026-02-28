@@ -1,27 +1,20 @@
 """Tests for inference/summary.py — LLM-friendly prediction summary builder."""
 
-import pytest
-
 from prometheus.inference.summary import (
-    build_prediction_summary,
-    lookup_codes,
-    _note_root_uncertainty,
+    MAX_CODES,
+    _build_verdict,
+    _code_prefix_for_partial_path,
+    _fallback_confidence_summary,
+    _note_bottleneck,
+    _note_confidence_gap,
+    _note_convergent_leaves,
     _note_heading_strength,
     _note_minority_leaf_confidence,
-    _note_convergent_leaves,
-    _note_confidence_gap,
-    _note_bottleneck,
-    _fallback_confidence_summary,
-    _build_verdict,
-    _label_with_code,
-    _root_code_label,
+    _note_root_uncertainty,
     _path_labels,
-    _leaf_confidence,
-    _root_confidence,
-    _code_prefix_for_partial_path,
-    MAX_CODES,
+    build_prediction_summary,
+    lookup_codes,
 )
-
 
 # ─── Fixtures ───
 
@@ -37,15 +30,16 @@ def _make_predictions(labels, confidences, level_names, margins=None, top_candid
             "confidence": conf,
             "margin": (margins[i] if margins else 0.5),
             "top_candidates": (
-                top_candidates[i] if top_candidates
-                else [{"label": label, "confidence": conf}]
+                top_candidates[i] if top_candidates else [{"label": label, "confidence": conf}]
             ),
         }
         preds.append(p)
     return preds
 
 
-def _make_routing(decision="HUMAN_REVIEW", confident_depth=0, confident_path=None, review_reason=None):
+def _make_routing(
+    decision="HUMAN_REVIEW", confident_depth=0, confident_path=None, review_reason=None
+):
     return {
         "decision": decision,
         "confident_depth": confident_depth,
@@ -54,7 +48,9 @@ def _make_routing(decision="HUMAN_REVIEW", confident_depth=0, confident_path=Non
     }
 
 
-def _make_structured_candidate(rank, labels, level_names, confidences, path_score, codes_by_level=None):
+def _make_structured_candidate(
+    rank, labels, level_names, confidences, path_score, codes_by_level=None
+):
     """Build a candidate with structured path for testing verdict/notes."""
     path = []
     for i, (label, name, conf) in enumerate(zip(labels, level_names, confidences)):
@@ -478,10 +474,18 @@ def test_note_heading_strength_across_forks():
         LEVEL_NAMES_3,
     )
     forked = [
-        {"suffix": ["A", "B", "C"], "suffix_indices": [0, 1, 2],
-         "score": -1.0, "per_level_probs": [0.35, 0.95, 0.50]},
-        {"suffix": ["D", "E", "F"], "suffix_indices": [3, 4, 5],
-         "score": -2.0, "per_level_probs": [0.30, 0.92, 0.40]},
+        {
+            "suffix": ["A", "B", "C"],
+            "suffix_indices": [0, 1, 2],
+            "score": -1.0,
+            "per_level_probs": [0.35, 0.95, 0.50],
+        },
+        {
+            "suffix": ["D", "E", "F"],
+            "suffix_indices": [3, 4, 5],
+            "score": -2.0,
+            "per_level_probs": [0.30, 0.92, 0.40],
+        },
     ]
     note = _note_heading_strength(predictions, [], forked)
     assert note is not None
@@ -507,7 +511,7 @@ def test_note_convergent_leaves():
     ]
     note = _note_convergent_leaves([], candidates, None)
     assert note is not None
-    assert 'Same' in note
+    assert "Same" in note
 
 
 def test_note_confidence_gap_dominant():
@@ -544,7 +548,9 @@ def test_note_confidence_gap_neither():
 
 def test_verdict_auto_accept():
     predictions = _make_predictions(["A", "B", "C"], [0.95, 0.90, 0.85], LEVEL_NAMES_3)
-    candidates = [_make_structured_candidate(1, ["A", "B", "C"], LEVEL_NAMES_3, [0.95, 0.90, 0.85], -0.5)]
+    candidates = [
+        _make_structured_candidate(1, ["A", "B", "C"], LEVEL_NAMES_3, [0.95, 0.90, 0.85], -0.5)
+    ]
     routing = _make_routing("AUTO_ACCEPT", 2)
     verdict = _build_verdict(predictions, candidates, routing)
     assert "reliable" in verdict
@@ -700,7 +706,8 @@ def test_note_bottleneck_fires():
     """IndustryGroup at 14% with strong neighbors → bottleneck note."""
     candidates = [
         _make_structured_candidate(
-            1, ["A", "B", "C", "D"],
+            1,
+            ["A", "B", "C", "D"],
             ["Sector", "Subsector", "IndustryGroup", "Industry"],
             [0.85, 1.00, 0.14, 1.00],
             -2.0,
@@ -717,7 +724,8 @@ def test_note_bottleneck_does_not_fire():
     """All levels above 50% → no bottleneck."""
     candidates = [
         _make_structured_candidate(
-            1, ["A", "B", "C"],
+            1,
+            ["A", "B", "C"],
             LEVEL_NAMES_3,
             [0.85, 0.75, 0.60],
             -1.0,
@@ -834,13 +842,19 @@ def test_verdict_dominant_candidate_with_codes():
     """When candidate has code_prefix, verdict should include it."""
     candidates = [
         _make_structured_candidate(
-            1, ["Rubber", "Belts", "Seals"], LEVEL_NAMES_3,
-            [0.85, 0.60, 0.31], -1.5,
+            1,
+            ["Rubber", "Belts", "Seals"],
+            LEVEL_NAMES_3,
+            [0.85, 0.60, 0.31],
+            -1.5,
             codes_by_level={0: {"code_prefix": "40"}},
         ),
         _make_structured_candidate(
-            2, ["Chemicals", "Acids", "Sulfuric"], LEVEL_NAMES_3,
-            [0.08, 0.50, 0.97], -5.0,
+            2,
+            ["Chemicals", "Acids", "Sulfuric"],
+            LEVEL_NAMES_3,
+            [0.08, 0.50, 0.97],
+            -5.0,
             codes_by_level={0: {"code_prefix": "38"}},
         ),
     ]
@@ -853,13 +867,19 @@ def test_verdict_oot_strong_root_with_codes():
     """OOT strong root with codes in label."""
     candidates = [
         _make_structured_candidate(
-            1, ["Rubber", "Belts", "Seals"], LEVEL_NAMES_3,
-            [0.75, 0.60, 0.50], -1.5,
+            1,
+            ["Rubber", "Belts", "Seals"],
+            LEVEL_NAMES_3,
+            [0.75, 0.60, 0.50],
+            -1.5,
             codes_by_level={0: {"code_prefix": "40"}},
         ),
         _make_structured_candidate(
-            2, ["Chemicals", "Acids", "X"], LEVEL_NAMES_3,
-            [0.10, 0.40, 0.30], -4.0,
+            2,
+            ["Chemicals", "Acids", "X"],
+            LEVEL_NAMES_3,
+            [0.10, 0.40, 0.30],
+            -4.0,
             codes_by_level={0: {"code_prefix": "38"}},
         ),
     ]
@@ -873,13 +893,19 @@ def test_verdict_different_roots_close_with_codes():
     """Root-level split verdict includes codes."""
     candidates = [
         _make_structured_candidate(
-            1, ["Rubber", "Belts", "Seals"], LEVEL_NAMES_3,
-            [0.40, 0.60, 0.31], -2.1,
+            1,
+            ["Rubber", "Belts", "Seals"],
+            LEVEL_NAMES_3,
+            [0.40, 0.60, 0.31],
+            -2.1,
             codes_by_level={0: {"code_prefix": "40"}},
         ),
         _make_structured_candidate(
-            2, ["Chemicals", "Acids", "Sulfuric"], LEVEL_NAMES_3,
-            [0.35, 0.55, 0.65], -2.4,
+            2,
+            ["Chemicals", "Acids", "Sulfuric"],
+            LEVEL_NAMES_3,
+            [0.35, 0.55, 0.65],
+            -2.4,
             codes_by_level={0: {"code_prefix": "38"}},
         ),
     ]

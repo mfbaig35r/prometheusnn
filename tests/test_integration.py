@@ -15,22 +15,20 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from prometheus.core.config import PrometheusConfig
-from prometheus.data.taxonomy import TaxonomyInfo
+from prometheus.data.loader import analyze_data
 from prometheus.data.splits import DataSplit
-from prometheus.data.loader import load_dataframe, analyze_data
-from prometheus.training.trainer import train_model, TrainingConfig
-from prometheus.training.cascade import HierarchicalClassifier
+from prometheus.data.taxonomy import TaxonomyInfo
 from prometheus.inference.beam_search import BeamSearchClassifier, GreedyClassifier
 from prometheus.inference.novelty import NoveltyDetector
-from prometheus.inference.router import ThresholdRouter
 from prometheus.inference.predictor import CascadePredictor
+from prometheus.inference.router import ThresholdRouter
 from prometheus.storage.model_store import (
-    save_model,
+    generate_thresholds,
     load_model,
     load_thresholds,
-    generate_thresholds,
+    save_model,
 )
+from prometheus.training.trainer import TrainingConfig, train_model
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "naics_test.csv"
 TEXT_COL = "description"
@@ -132,7 +130,6 @@ class TestAnalyzeData:
 class TestTraining:
     def test_model_has_correct_structure(self, trained_model, naics_taxonomy_and_splits):
         model, result, _, _ = trained_model
-        taxonomy = naics_taxonomy_and_splits[0]
 
         assert model.num_levels == 4
         assert len(result.level_metrics) == 4
@@ -201,8 +198,13 @@ class TestSaveLoadRoundtrip:
             assert "created_at" in manifest_data
 
             # Level names preserved
-            level_names = [l["name"] for l in manifest_data["taxonomy"]["levels"]]
-            assert level_names == ["Sector", "Subsector", "IndustryGroup", "NAICSIndustry"]
+            level_names = [lvl["name"] for lvl in manifest_data["taxonomy"]["levels"]]
+            assert level_names == [
+                "Sector",
+                "Subsector",
+                "IndustryGroup",
+                "NAICSIndustry",
+            ]
 
             # Load
             loaded_model, loaded_manifest = load_model(model_path)
@@ -211,6 +213,7 @@ class TestSaveLoadRoundtrip:
 
             # Compare root-level predictions (no context needed)
             import torch
+
             test_emb = torch.randn(1, EMBED_DIM)
             model.eval()
             loaded_model.eval()
@@ -230,8 +233,12 @@ class TestSaveLoadRoundtrip:
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = Path(tmpdir) / "no_pickle_test"
             save_model(
-                path=model_path, model=model, taxonomy=taxonomy,
-                result=result, config=config, embedding_dim=EMBED_DIM,
+                path=model_path,
+                model=model,
+                taxonomy=taxonomy,
+                result=result,
+                config=config,
+                embedding_dim=EMBED_DIM,
             )
 
             pkl_files = list(model_path.glob("*.pkl")) + list(model_path.glob("*.pickle"))
@@ -290,7 +297,9 @@ class TestInference:
         assert result.prediction_id
         assert len(result.path) == 4
         assert result.routing["decision"] in [
-            "AUTO_ACCEPT", "HUMAN_REVIEW", "OUT_OF_TAXONOMY"
+            "AUTO_ACCEPT",
+            "HUMAN_REVIEW",
+            "OUT_OF_TAXONOMY",
         ]
         assert "centroid_z_score" in result.novelty
         assert len(result.predictions) == 4
@@ -315,8 +324,10 @@ class TestInference:
         router = ThresholdRouter(thresholds, taxonomy.level_names)
 
         predictor = CascadePredictor(
-            model=model, taxonomy=taxonomy,
-            novelty_detector=novelty, router=router,
+            model=model,
+            taxonomy=taxonomy,
+            novelty_detector=novelty,
+            router=router,
         )
 
         embs = np.random.randn(10, EMBED_DIM).astype(np.float32)
@@ -343,8 +354,12 @@ class TestThresholds:
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = Path(tmpdir) / "thresh_test"
             save_model(
-                path=model_path, model=model, taxonomy=taxonomy,
-                result=result, config=config, embedding_dim=EMBED_DIM,
+                path=model_path,
+                model=model,
+                taxonomy=taxonomy,
+                result=result,
+                config=config,
+                embedding_dim=EMBED_DIM,
             )
 
             loaded = load_thresholds(model_path)

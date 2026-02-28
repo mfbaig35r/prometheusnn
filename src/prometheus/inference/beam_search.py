@@ -15,6 +15,7 @@ from prometheus.training.cascade import HierarchicalClassifier
 @dataclass
 class BeamPath:
     """A single path hypothesis in beam search."""
+
     indices: list[int]
     labels: list[str]
     probs: list[float]
@@ -24,6 +25,7 @@ class BeamPath:
 @dataclass
 class LevelPrediction:
     """Prediction details for a single level."""
+
     depth: int
     name: str
     predicted: str
@@ -36,6 +38,7 @@ class LevelPrediction:
 @dataclass
 class CascadePrediction:
     """Full prediction result."""
+
     path: list[str]
     path_indices: list[int]
     path_score: float
@@ -158,20 +161,20 @@ class BeamSearchClassifier:
 
             top_k = np.argsort(probs)[::-1][:effective_width]
             for idx in top_k:
-                new_beams.append(BeamPath(
-                    indices=beam.indices + [int(idx)],
-                    labels=beam.labels + [classes[idx]],
-                    probs=beam.probs + [float(probs[idx])],
-                    log_score=beam.log_score + float(np.log(probs[idx] + 1e-10)),
-                ))
+                new_beams.append(
+                    BeamPath(
+                        indices=beam.indices + [int(idx)],
+                        labels=beam.labels + [classes[idx]],
+                        probs=beam.probs + [float(probs[idx])],
+                        log_score=beam.log_score + float(np.log(probs[idx] + 1e-10)),
+                    )
+                )
 
         new_beams.sort(key=lambda b: b.log_score, reverse=True)
         pruned = self._prune_with_diversity(new_beams, effective_width)
         return pruned, best_probs
 
-    def _prune_with_diversity(
-        self, beams: list[BeamPath], width: int
-    ) -> list[BeamPath]:
+    def _prune_with_diversity(self, beams: list[BeamPath], width: int) -> list[BeamPath]:
         """Prune beams, guaranteeing representation from each branch at the uncertain depth."""
         if self._diversity_depth is None or len(beams) <= width:
             return beams[:width]
@@ -223,20 +226,20 @@ class BeamSearchClassifier:
             ]
 
             margin = (
-                float(probs[sorted_idx[0]] - probs[sorted_idx[1]])
-                if len(sorted_idx) >= 2
-                else 1.0
+                float(probs[sorted_idx[0]] - probs[sorted_idx[1]]) if len(sorted_idx) >= 2 else 1.0
             )
 
-            predictions.append(LevelPrediction(
-                depth=depth,
-                name=level.name,
-                predicted=beam.labels[depth],
-                predicted_idx=beam.indices[depth],
-                confidence=beam.probs[depth],
-                margin=margin,
-                top_candidates=top_candidates,
-            ))
+            predictions.append(
+                LevelPrediction(
+                    depth=depth,
+                    name=level.name,
+                    predicted=beam.labels[depth],
+                    predicted_idx=beam.indices[depth],
+                    confidence=beam.probs[depth],
+                    margin=margin,
+                    top_candidates=top_candidates,
+                )
+            )
         return predictions
 
 
@@ -306,15 +309,17 @@ class GreedyClassifier:
                     else 1.0
                 )
 
-                level_predictions.append(LevelPrediction(
-                    depth=depth,
-                    name=level.name,
-                    predicted=level.classes[pred_idx],
-                    predicted_idx=pred_idx,
-                    confidence=pred_prob,
-                    margin=margin,
-                    top_candidates=top_candidates,
-                ))
+                level_predictions.append(
+                    LevelPrediction(
+                        depth=depth,
+                        name=level.name,
+                        predicted=level.classes[pred_idx],
+                        predicted_idx=pred_idx,
+                        confidence=pred_prob,
+                        margin=margin,
+                        top_candidates=top_candidates,
+                    )
+                )
 
                 one_hot = torch.zeros(1, level.num_classes, device=self.device)
                 one_hot[0, pred_idx] = 1.0

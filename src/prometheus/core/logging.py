@@ -13,10 +13,12 @@ def setup_logging(logs_dir: Path, level: int = logging.INFO) -> None:
         maxBytes=10 * 1024 * 1024,  # 10 MB
         backupCount=3,
     )
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(name)s %(levelname)s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    ))
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(name)s %(levelname)s %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
     root = logging.getLogger("prometheus")
     root.setLevel(level)
     root.addHandler(handler)

@@ -3,24 +3,22 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Optional
 import uuid
-
-logger = logging.getLogger(__name__)
+from dataclasses import dataclass
 
 import numpy as np
 import torch
 
 from prometheus.data.taxonomy import TaxonomyInfo
-from prometheus.training.cascade import HierarchicalClassifier
 from prometheus.inference.beam_search import (
     BeamSearchClassifier,
     GreedyClassifier,
-    CascadePrediction,
 )
-from prometheus.inference.novelty import NoveltyDetector, NoveltyScore
-from prometheus.inference.router import ThresholdRouter, RoutingResult, RoutingDecision
+from prometheus.inference.novelty import NoveltyDetector
+from prometheus.inference.router import ThresholdRouter
+from prometheus.training.cascade import HierarchicalClassifier
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -56,12 +54,17 @@ class CascadePredictor:
         self.router = router
 
         self.greedy = GreedyClassifier(
-            model=model, taxonomy=taxonomy, device=self.device,
+            model=model,
+            taxonomy=taxonomy,
+            device=self.device,
             parent_child_map=parent_child_map,
         )
         self.beam = BeamSearchClassifier(
-            model=model, taxonomy=taxonomy, device=self.device,
-            beam_width=beam_width, parent_child_map=parent_child_map,
+            model=model,
+            taxonomy=taxonomy,
+            device=self.device,
+            beam_width=beam_width,
+            parent_child_map=parent_child_map,
             confidence_thresholds=router.thresholds,
             adaptive_factor=adaptive_factor,
         )
@@ -92,17 +95,19 @@ class CascadePredictor:
         # Format per-level predictions
         predictions = []
         for lp in cascade_result.level_predictions:
-            predictions.append({
-                "depth": lp.depth,
-                "level": lp.name,
-                "predicted": lp.predicted,
-                "confidence": round(lp.confidence, 4),
-                "margin": round(lp.margin, 4),
-                "top_candidates": [
-                    {"label": c["label"], "confidence": round(c["confidence"], 4)}
-                    for c in lp.top_candidates
-                ],
-            })
+            predictions.append(
+                {
+                    "depth": lp.depth,
+                    "level": lp.name,
+                    "predicted": lp.predicted,
+                    "confidence": round(lp.confidence, 4),
+                    "margin": round(lp.margin, 4),
+                    "top_candidates": [
+                        {"label": c["label"], "confidence": round(c["confidence"], 4)}
+                        for c in lp.top_candidates
+                    ],
+                }
+            )
 
         # Format forked completions
         forked = None
@@ -117,9 +122,13 @@ class CascadePredictor:
                 for fc in routing.forked_completions
             ]
 
-        logger.info("prediction=%s routing=%s novel=%s path=%s",
-                    prediction_id, routing.decision.value, novelty.is_novel,
-                    cascade_result.path)
+        logger.info(
+            "prediction=%s routing=%s novel=%s path=%s",
+            prediction_id,
+            routing.decision.value,
+            novelty.is_novel,
+            cascade_result.path,
+        )
 
         return PredictionResult(
             prediction_id=prediction_id,
@@ -150,7 +159,6 @@ class CascadePredictor:
     ) -> list[PredictionResult]:
         texts = texts or [""] * len(embeddings)
         return [
-            self.predict(emb, text=t, use_beam_search=use_beam_search,
-                         beam_width=beam_width)
+            self.predict(emb, text=t, use_beam_search=use_beam_search, beam_width=beam_width)
             for emb, t in zip(embeddings, texts)
         ]

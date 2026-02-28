@@ -6,22 +6,22 @@ import json
 import logging
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 import numpy as np
-import torch
 
 from prometheus.data.taxonomy import TaxonomyInfo
 from prometheus.training.cascade import HierarchicalClassifier
-from prometheus.training.trainer import TrainingResult, TrainingConfig
+from prometheus.training.trainer import TrainingConfig, TrainingResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ModelManifest:
     """Single source of truth for a saved model."""
+
     taxonomy: TaxonomyInfo
     training_config: dict
     per_level_metrics: dict
@@ -37,7 +37,9 @@ class ModelManifest:
             "taxonomy": self.taxonomy.to_dict(),
             "training_config": self.training_config,
             "per_level_metrics": self.per_level_metrics,
-            "calibration_temperatures": {str(k): v for k, v in self.calibration_temperatures.items()},
+            "calibration_temperatures": {
+                str(k): v for k, v in self.calibration_temperatures.items()
+            },
             "threshold_config": self.threshold_config,
             "embedding_dim": self.embedding_dim,
             "created_at": self.created_at,
@@ -51,7 +53,9 @@ class ModelManifest:
             taxonomy=TaxonomyInfo.from_dict(data["taxonomy"]),
             training_config=data["training_config"],
             per_level_metrics=data["per_level_metrics"],
-            calibration_temperatures={int(k): v for k, v in data["calibration_temperatures"].items()},
+            calibration_temperatures={
+                int(k): v for k, v in data["calibration_temperatures"].items()
+            },
             threshold_config=data["threshold_config"],
             embedding_dim=data["embedding_dim"],
             created_at=data.get("created_at", ""),
@@ -162,7 +166,7 @@ def save_model(
         calibration_temperatures=calib_temps,
         threshold_config=thresholds,
         embedding_dim=embedding_dim,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
         artifacts=artifacts,
     )
 

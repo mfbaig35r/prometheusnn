@@ -19,18 +19,19 @@ class RoutingDecision(Enum):
 @dataclass
 class ForkedCompletion:
     """A candidate completion below the fork point."""
-    suffix: list[str]           # labels from fork_depth onward
-    suffix_indices: list[int]   # indices from fork_depth onward
-    suffix_score: float         # cumulative log prob of the suffix portion
+
+    suffix: list[str]  # labels from fork_depth onward
+    suffix_indices: list[int]  # indices from fork_depth onward
+    suffix_score: float  # cumulative log prob of the suffix portion
     per_level_probs: list[float]  # prob at each suffix level
 
 
 @dataclass
 class RoutingResult:
     decision: RoutingDecision
-    confident_depth: int | None       # deepest confident level depth (or None)
-    confident_path: list[str]         # path up to confident_depth
-    full_path: list[str]              # full predicted path regardless
+    confident_depth: int | None  # deepest confident level depth (or None)
+    confident_path: list[str]  # path up to confident_depth
+    full_path: list[str]  # full predicted path regardless
     review_reason: str | None
     forked_completions: list[ForkedCompletion] | None = None
 
@@ -48,9 +49,7 @@ class ThresholdRouter:
         self.level_names = level_names
         self.margin_threshold = thresholds.get("margin", 0.15)
 
-    def route(
-        self, prediction: CascadePrediction, novelty: NoveltyScore
-    ) -> RoutingResult:
+    def route(self, prediction: CascadePrediction, novelty: NoveltyScore) -> RoutingResult:
         if novelty.is_novel:
             return RoutingResult(
                 decision=RoutingDecision.OUT_OF_TAXONOMY,
@@ -72,8 +71,7 @@ class ThresholdRouter:
                 confident_depth = lp.depth
             else:
                 review_reason = (
-                    f"{lp.name} confidence below threshold "
-                    f"({lp.confidence:.2f} < {threshold:.2f})"
+                    f"{lp.name} confidence below threshold ({lp.confidence:.2f} < {threshold:.2f})"
                 )
                 break
 
@@ -84,8 +82,7 @@ class ThresholdRouter:
                 confident_path = confident_path[:idx]
                 confident_depth = idx - 1 if idx > 0 else None
                 review_reason = (
-                    f"{lp.name} margin too narrow "
-                    f"({lp.margin:.2f} < {self.margin_threshold:.2f})"
+                    f"{lp.name} margin too narrow ({lp.margin:.2f} < {self.margin_threshold:.2f})"
                 )
                 break
 

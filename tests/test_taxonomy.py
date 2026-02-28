@@ -2,7 +2,7 @@
 
 import json
 
-from prometheus.data.taxonomy import TaxonomyInfo, LevelSpec
+from prometheus.data.taxonomy import LevelSpec, TaxonomyInfo
 
 
 def test_level_spec_basics():

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from prometheus.training.trainer import LevelMetrics
-from prometheus.training.calibration import CalibrationResult
-from prometheus.data.taxonomy import TaxonomyInfo
 from prometheus.data.splits import DataSplit
-
+from prometheus.data.taxonomy import TaxonomyInfo
+from prometheus.training.trainer import LevelMetrics
 
 # ─── Shared helpers ───
 
@@ -71,12 +69,14 @@ def build_training_insights(
                 if i != j and cm[i, j] > 0:
                     true_class = level.classes[i] if i < len(level.classes) else str(i)
                     pred_class = level.classes[j] if j < len(level.classes) else str(j)
-                    confused_pairs.append({
-                        "level": lm.name,
-                        "true_class": true_class,
-                        "predicted_class": pred_class,
-                        "count": int(cm[i, j]),
-                    })
+                    confused_pairs.append(
+                        {
+                            "level": lm.name,
+                            "true_class": true_class,
+                            "predicted_class": pred_class,
+                            "count": int(cm[i, j]),
+                        }
+                    )
     confused_pairs.sort(key=lambda x: x["count"], reverse=True)
     most_confused_pairs = confused_pairs[:5]
 
@@ -84,12 +84,14 @@ def build_training_insights(
     early_stopping = []
     for lm in level_metrics:
         if lm.best_epoch is not None and lm.total_epochs is not None:
-            early_stopping.append({
-                "level": lm.name,
-                "best_epoch": lm.best_epoch,
-                "total_epochs": lm.total_epochs,
-                "converged_early": lm.best_epoch < lm.total_epochs - 1,
-            })
+            early_stopping.append(
+                {
+                    "level": lm.name,
+                    "best_epoch": lm.best_epoch,
+                    "total_epochs": lm.total_epochs,
+                    "converged_early": lm.best_epoch < lm.total_epochs - 1,
+                }
+            )
 
     # Class balance
     class_balance = []
@@ -101,13 +103,15 @@ def build_training_insights(
             min_count = int(counts.min())
             max_count = int(counts.max())
             ratio = max_count / min_count if min_count > 0 else float("inf")
-            class_balance.append({
-                "level": lm.name,
-                "num_classes": len(counts),
-                "min_class_count": min_count,
-                "max_class_count": max_count,
-                "imbalance_ratio": round(ratio, 1),
-            })
+            class_balance.append(
+                {
+                    "level": lm.name,
+                    "num_classes": len(counts),
+                    "min_class_count": min_count,
+                    "max_class_count": max_count,
+                    "imbalance_ratio": round(ratio, 1),
+                }
+            )
 
     # Interpretation sentences
     interpretation = []
@@ -220,13 +224,15 @@ def build_evaluation_insights(
                         assessment = "improved"
                     else:
                         assessment = "consistent"
-                    accuracy_vs_training.append({
-                        "level": name,
-                        "eval_accuracy": round(eval_acc, 4),
-                        "train_val_accuracy": round(train_val_acc, 4),
-                        "delta": round(delta, 4),
-                        "assessment": assessment,
-                    })
+                    accuracy_vs_training.append(
+                        {
+                            "level": name,
+                            "eval_accuracy": round(eval_acc, 4),
+                            "train_val_accuracy": round(train_val_acc, 4),
+                            "delta": round(delta, 4),
+                            "assessment": assessment,
+                        }
+                    )
 
     # Interpretation
     interpretation = []
@@ -335,7 +341,7 @@ def build_model_health(manifest: dict) -> dict:
 
     if overall == "ready":
         interpretation.append(
-            f"Model is production-ready: all levels above 75% validation accuracy, no flags."
+            "Model is production-ready: all levels above 75% validation accuracy, no flags."
         )
     elif overall == "caution":
         interpretation.append(
@@ -343,9 +349,7 @@ def build_model_health(manifest: dict) -> dict:
             f"at {min_val:.0%} validation accuracy."
         )
     else:
-        interpretation.append(
-            f"Model is not ready for production: {len(flags)} issue(s) found."
-        )
+        interpretation.append(f"Model is not ready for production: {len(flags)} issue(s) found.")
 
     for flag in flags:
         interpretation.append(flag)

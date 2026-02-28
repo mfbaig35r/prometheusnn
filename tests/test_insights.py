@@ -1,20 +1,18 @@
 """Tests for educational learning insights module."""
 
 import numpy as np
-import pytest
 
-from prometheus.training.trainer import LevelMetrics
-from prometheus.training.calibration import CalibrationResult
-from prometheus.data.taxonomy import TaxonomyInfo, LevelSpec
 from prometheus.data.splits import DataSplit
+from prometheus.data.taxonomy import LevelSpec, TaxonomyInfo
 from prometheus.insights import (
-    _ece_quality,
     _accuracy_assessment,
-    build_training_insights,
+    _ece_quality,
     build_evaluation_insights,
     build_model_health,
+    build_training_insights,
 )
-
+from prometheus.training.calibration import CalibrationResult
+from prometheus.training.trainer import LevelMetrics
 
 # ─── Helper tests ───
 
@@ -54,10 +52,20 @@ def _make_taxonomy():
     return TaxonomyInfo(
         name="test",
         levels=[
-            LevelSpec(depth=0, name="Category", classes=["A", "B", "C"],
-                      class_to_idx={"A": 0, "B": 1, "C": 2}, parent_dims=[]),
-            LevelSpec(depth=1, name="SubCategory", classes=["X", "Y", "Z", "W"],
-                      class_to_idx={"X": 0, "Y": 1, "Z": 2, "W": 3}, parent_dims=[3]),
+            LevelSpec(
+                depth=0,
+                name="Category",
+                classes=["A", "B", "C"],
+                class_to_idx={"A": 0, "B": 1, "C": 2},
+                parent_dims=[],
+            ),
+            LevelSpec(
+                depth=1,
+                name="SubCategory",
+                classes=["X", "Y", "Z", "W"],
+                class_to_idx={"X": 0, "Y": 1, "Z": 2, "W": 3},
+                parent_dims=[3],
+            ),
         ],
         text_column="text",
         embedding_model="test",
@@ -95,18 +103,20 @@ def _make_level_metrics(
             ece_before=ece_befores[i],
             ece_after=ece_afters[i],
         )
-        metrics.append(LevelMetrics(
-            depth=i,
-            name=names[i],
-            train_loss=0.5,
-            train_accuracy=train_accs[i],
-            val_loss=0.6,
-            val_accuracy=val_accs[i],
-            confusion_matrix=cm,
-            calibration=calib,
-            best_epoch=best_epochs[i],
-            total_epochs=total_epochs[i],
-        ))
+        metrics.append(
+            LevelMetrics(
+                depth=i,
+                name=names[i],
+                train_loss=0.5,
+                train_accuracy=train_accs[i],
+                val_loss=0.6,
+                val_accuracy=val_accs[i],
+                confusion_matrix=cm,
+                calibration=calib,
+                best_epoch=best_epochs[i],
+                total_epochs=total_epochs[i],
+            )
+        )
     return metrics
 
 
@@ -283,8 +293,7 @@ class TestBuildEvaluationInsights:
 
 
 class TestBuildModelHealth:
-    def _manifest(self, val_accs=(0.85, 0.78), train_accs=(0.88, 0.82),
-                  ece_afters=(0.02, 0.04)):
+    def _manifest(self, val_accs=(0.85, 0.78), train_accs=(0.88, 0.82), ece_afters=(0.02, 0.04)):
         return {
             "taxonomy": {
                 "levels": [
@@ -294,43 +303,55 @@ class TestBuildModelHealth:
             },
             "per_level_metrics": {
                 "Category": {
-                    "val_accuracy": val_accs[0], "train_accuracy": train_accs[0],
+                    "val_accuracy": val_accs[0],
+                    "train_accuracy": train_accs[0],
                     "calibration": {
-                        "temperature": 1.1, "ece_before": 0.08, "ece_after": ece_afters[0],
+                        "temperature": 1.1,
+                        "ece_before": 0.08,
+                        "ece_after": ece_afters[0],
                     },
                 },
                 "SubCategory": {
-                    "val_accuracy": val_accs[1], "train_accuracy": train_accs[1],
+                    "val_accuracy": val_accs[1],
+                    "train_accuracy": train_accs[1],
                     "calibration": {
-                        "temperature": 1.2, "ece_before": 0.10, "ece_after": ece_afters[1],
+                        "temperature": 1.2,
+                        "ece_before": 0.10,
+                        "ece_after": ece_afters[1],
                     },
                 },
             },
         }
 
     def test_production_readiness_ready(self):
-        result = build_model_health(self._manifest(
-            val_accs=(0.88, 0.80),
-            train_accs=(0.90, 0.83),
-            ece_afters=(0.02, 0.03),
-        ))
+        result = build_model_health(
+            self._manifest(
+                val_accs=(0.88, 0.80),
+                train_accs=(0.90, 0.83),
+                ece_afters=(0.02, 0.03),
+            )
+        )
         assert result["production_readiness"]["overall"] == "ready"
         assert result["production_readiness"]["flags"] == []
 
     def test_production_readiness_caution(self):
-        result = build_model_health(self._manifest(
-            val_accs=(0.85, 0.62),
-            train_accs=(0.88, 0.65),
-            ece_afters=(0.03, 0.04),
-        ))
+        result = build_model_health(
+            self._manifest(
+                val_accs=(0.85, 0.62),
+                train_accs=(0.88, 0.65),
+                ece_afters=(0.03, 0.04),
+            )
+        )
         assert result["production_readiness"]["overall"] == "caution"
 
     def test_production_readiness_not_ready(self):
-        result = build_model_health(self._manifest(
-            val_accs=(0.55, 0.45),
-            train_accs=(0.95, 0.90),
-            ece_afters=(0.15, 0.12),
-        ))
+        result = build_model_health(
+            self._manifest(
+                val_accs=(0.55, 0.45),
+                train_accs=(0.95, 0.90),
+                ece_afters=(0.15, 0.12),
+            )
+        )
         assert result["production_readiness"]["overall"] == "not_ready"
         assert len(result["production_readiness"]["flags"]) >= 2
 

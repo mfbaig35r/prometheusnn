@@ -8,8 +8,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from prometheus.data.splits import BatchIterator, DataSplit
 from prometheus.training.cascade import HierarchicalClassifier
-from prometheus.data.splits import DataSplit, BatchIterator
 
 
 @dataclass
@@ -100,7 +100,9 @@ class TemperatureScaler:
 
         with torch.no_grad():
             for batch in BatchIterator(calib_data, batch_size=batch_size, shuffle=False):
-                embeddings = torch.tensor(batch["embeddings"], dtype=torch.float32, device=self.device)
+                embeddings = torch.tensor(
+                    batch["embeddings"], dtype=torch.float32, device=self.device
+                )
                 labels = batch[depth]
 
                 parent_context = self._build_context(batch, parent_depths, num_classes_per_level)

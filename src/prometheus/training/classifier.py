@@ -1,7 +1,5 @@
 """Single-level feedforward classifier (ported from parts-classifier, unchanged)."""
 
-from typing import Optional
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,11 +33,13 @@ class LevelClassifier(nn.Module):
         layers: list[nn.Module] = []
         prev_dim = input_dim
         for hidden_dim in hidden_dims:
-            layers.extend([
-                nn.Linear(prev_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-            ])
+            layers.extend(
+                [
+                    nn.Linear(prev_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                ]
+            )
             prev_dim = hidden_dim
         layers.append(nn.Linear(prev_dim, num_classes))
 
@@ -49,7 +49,7 @@ class LevelClassifier(nn.Module):
     def forward(
         self,
         embedding: torch.Tensor,
-        parent_context: Optional[torch.Tensor] = None,
+        parent_context: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if parent_context is not None:
             x = torch.cat([embedding, parent_context], dim=-1)
@@ -61,7 +61,7 @@ class LevelClassifier(nn.Module):
     def predict_proba(
         self,
         embedding: torch.Tensor,
-        parent_context: Optional[torch.Tensor] = None,
+        parent_context: torch.Tensor | None = None,
     ) -> torch.Tensor:
         logits = self.forward(embedding, parent_context)
         return F.softmax(logits, dim=-1)

@@ -1,10 +1,10 @@
 """Tests for training pipeline."""
 
 import numpy as np
-import torch
-from prometheus.data.taxonomy import TaxonomyInfo, LevelSpec
+
 from prometheus.data.splits import DataSplit
-from prometheus.training.trainer import train_model, TrainingConfig
+from prometheus.data.taxonomy import LevelSpec, TaxonomyInfo
+from prometheus.training.trainer import TrainingConfig, train_model
 
 
 def _make_synthetic_data(n=60, embed_dim=16):
@@ -15,10 +15,20 @@ def _make_synthetic_data(n=60, embed_dim=16):
     taxonomy = TaxonomyInfo(
         name="synth",
         levels=[
-            LevelSpec(depth=0, name="L0", classes=["A", "B", "C"],
-                      class_to_idx={"A": 0, "B": 1, "C": 2}, parent_dims=[]),
-            LevelSpec(depth=1, name="L1", classes=["X", "Y", "Z", "W"],
-                      class_to_idx={"X": 0, "Y": 1, "Z": 2, "W": 3}, parent_dims=[3]),
+            LevelSpec(
+                depth=0,
+                name="L0",
+                classes=["A", "B", "C"],
+                class_to_idx={"A": 0, "B": 1, "C": 2},
+                parent_dims=[],
+            ),
+            LevelSpec(
+                depth=1,
+                name="L1",
+                classes=["X", "Y", "Z", "W"],
+                class_to_idx={"X": 0, "Y": 1, "Z": 2, "W": 3},
+                parent_dims=[3],
+            ),
         ],
         text_column="text",
         embedding_model="test",
@@ -30,10 +40,14 @@ def _make_synthetic_data(n=60, embed_dim=16):
     d1 = rng.integers(0, 4, size=n)
 
     train_n = int(n * 0.8)
-    train = DataSplit(embeddings=embeddings[:train_n],
-                      labels_by_depth={0: d0[:train_n], 1: d1[:train_n]})
-    val = DataSplit(embeddings=embeddings[train_n:],
-                    labels_by_depth={0: d0[train_n:], 1: d1[train_n:]})
+    train = DataSplit(
+        embeddings=embeddings[:train_n],
+        labels_by_depth={0: d0[:train_n], 1: d1[:train_n]},
+    )
+    val = DataSplit(
+        embeddings=embeddings[train_n:],
+        labels_by_depth={0: d0[train_n:], 1: d1[train_n:]},
+    )
 
     return taxonomy, train, val, embed_dim
 

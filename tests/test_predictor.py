@@ -1,21 +1,32 @@
 """Tests for CascadePredictor."""
 
 import numpy as np
-from prometheus.data.taxonomy import TaxonomyInfo, LevelSpec
-from prometheus.training.cascade import HierarchicalClassifier
+
+from prometheus.data.taxonomy import LevelSpec, TaxonomyInfo
 from prometheus.inference.novelty import NoveltyDetector
-from prometheus.inference.router import ThresholdRouter
 from prometheus.inference.predictor import CascadePredictor
+from prometheus.inference.router import ThresholdRouter
+from prometheus.training.cascade import HierarchicalClassifier
 
 
 def _make_predictor():
     taxonomy = TaxonomyInfo(
         name="test",
         levels=[
-            LevelSpec(depth=0, name="A", classes=["a1", "a2"],
-                      class_to_idx={"a1": 0, "a2": 1}, parent_dims=[]),
-            LevelSpec(depth=1, name="B", classes=["b1", "b2", "b3"],
-                      class_to_idx={"b1": 0, "b2": 1, "b3": 2}, parent_dims=[2]),
+            LevelSpec(
+                depth=0,
+                name="A",
+                classes=["a1", "a2"],
+                class_to_idx={"a1": 0, "a2": 1},
+                parent_dims=[],
+            ),
+            LevelSpec(
+                depth=1,
+                name="B",
+                classes=["b1", "b2", "b3"],
+                class_to_idx={"b1": 0, "b2": 1, "b3": 2},
+                parent_dims=[2],
+            ),
         ],
         text_column="text",
         embedding_model="test",
@@ -34,11 +45,16 @@ def _make_predictor():
     novelty = NoveltyDetector()
     novelty.fit(embs, labels, ["b1", "b2", "b3"])
 
-    thresholds = {0: 0.90, 1: 0.80, "margin": 0.15, "z_score": 2.5, "novelty_conf": 0.70}
+    thresholds = {
+        0: 0.90,
+        1: 0.80,
+        "margin": 0.15,
+        "z_score": 2.5,
+        "novelty_conf": 0.70,
+    }
     router = ThresholdRouter(thresholds, ["A", "B"])
 
-    return CascadePredictor(model=model, taxonomy=taxonomy,
-                            novelty_detector=novelty, router=router)
+    return CascadePredictor(model=model, taxonomy=taxonomy, novelty_detector=novelty, router=router)
 
 
 def test_predict_returns_valid_result():
@@ -50,7 +66,11 @@ def test_predict_returns_valid_result():
     assert len(result.path) == 2
     assert result.path[0] in ["a1", "a2"]
     assert result.path[1] in ["b1", "b2", "b3"]
-    assert result.routing["decision"] in ["AUTO_ACCEPT", "HUMAN_REVIEW", "OUT_OF_TAXONOMY"]
+    assert result.routing["decision"] in [
+        "AUTO_ACCEPT",
+        "HUMAN_REVIEW",
+        "OUT_OF_TAXONOMY",
+    ]
     assert "centroid_z_score" in result.novelty
 
 

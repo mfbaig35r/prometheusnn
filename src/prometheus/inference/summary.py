@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from os.path import commonprefix
 
 MAX_CODES = 5
@@ -30,7 +29,11 @@ def build_prediction_summary(
         Summary dict with candidates, classification_notes, verdict, routing.
     """
     candidates = _build_candidates(
-        predictions, forked_completions, path_score, level_names, code_mapping,
+        predictions,
+        forked_completions,
+        path_score,
+        level_names,
+        code_mapping,
     )
     notes = _build_classification_notes(predictions, candidates, forked_completions, code_mapping)
     verdict = _build_verdict(predictions, candidates, routing, code_mapping)
@@ -167,10 +170,10 @@ def _build_candidates(
     else:
         # No forks — single candidate (the best path)
         best_path = [p["predicted"] for p in predictions]
-        confidence_per_level = {
-            p["level"]: round(p["confidence"], 4) for p in predictions
-        }
-        structured_path = _build_structured_path(best_path, level_names, confidence_per_level, code_mapping)
+        confidence_per_level = {p["level"]: round(p["confidence"], 4) for p in predictions}
+        structured_path = _build_structured_path(
+            best_path, level_names, confidence_per_level, code_mapping
+        )
         candidate = {
             "rank": 1,
             "path": structured_path,
@@ -197,7 +200,9 @@ def _build_candidates(
                 if suffix_idx < len(suffix_probs):
                     confidence_per_level[name] = round(suffix_probs[suffix_idx], 4)
 
-        structured_path = _build_structured_path(full_path, level_names, confidence_per_level, code_mapping)
+        structured_path = _build_structured_path(
+            full_path, level_names, confidence_per_level, code_mapping
+        )
         candidate = {
             "rank": i + 1,
             "path": structured_path,
@@ -353,15 +358,12 @@ def _note_root_uncertainty(
         return None
 
     top_conf = top_cands[0]["confidence"]
-    close_count = sum(
-        1 for c in top_cands[1:3]
-        if top_conf - c["confidence"] <= 0.20
-    )
+    close_count = sum(1 for c in top_cands[1:3] if top_conf - c["confidence"] <= 0.20)
     if close_count > 0:
         level_name = root["level"]
         labels = [
             _label_with_code(c["label"], [c["label"]], code_mapping)
-            for c in top_cands[:close_count + 1]
+            for c in top_cands[: close_count + 1]
         ]
         return (
             f"{level_name}-level uncertainty: top {len(labels)} labels within 20pp "
@@ -425,7 +427,6 @@ def _note_minority_leaf_confidence(
         c_leaf = _leaf_confidence(c)
         if c_leaf is not None and c_leaf > best_leaf_conf + 0.10:
             leaf_entry = c["path"][-1]
-            leaf_label = leaf_entry["label"]
             leaf_code = leaf_entry.get("code_prefix") or ""
             if leaf_entry.get("codes"):
                 leaf_code = ", ".join(leaf_entry["codes"][:3])
@@ -464,7 +465,7 @@ def _note_convergent_leaves(
         if len(ranks) >= 2:
             rank_str = " and ".join(str(r) for r in ranks)
             code_suffix = f" [{leaf_to_codes[leaf]}]" if leaf in leaf_to_codes else ""
-            return f"Candidates {rank_str} converge on same leaf \"{leaf}\"{code_suffix}"
+            return f'Candidates {rank_str} converge on same leaf "{leaf}"{code_suffix}'
     return None
 
 
@@ -512,7 +513,9 @@ def _note_bottleneck(
                 has_strong_neighbor = True
             if has_strong_neighbor:
                 level_name = path[i]["level"]
-                return f"Confidence bottleneck at {level_name} ({conf:.0%}); other levels are strong."
+                return (
+                    f"Confidence bottleneck at {level_name} ({conf:.0%}); other levels are strong."
+                )
     return None
 
 

@@ -1,6 +1,7 @@
 """Tests for LevelClassifier."""
 
 import torch
+
 from prometheus.training.classifier import LevelClassifier
 
 

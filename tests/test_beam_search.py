@@ -3,23 +3,33 @@
 import numpy as np
 import torch
 
-from prometheus.data.taxonomy import TaxonomyInfo, LevelSpec
-from prometheus.training.cascade import HierarchicalClassifier
+from prometheus.data.taxonomy import LevelSpec, TaxonomyInfo
 from prometheus.inference.beam_search import (
     BeamPath,
     BeamSearchClassifier,
     GreedyClassifier,
 )
+from prometheus.training.cascade import HierarchicalClassifier
 
 
 def _make_model_and_taxonomy():
     taxonomy = TaxonomyInfo(
         name="test",
         levels=[
-            LevelSpec(depth=0, name="L0", classes=["A", "B"],
-                      class_to_idx={"A": 0, "B": 1}, parent_dims=[]),
-            LevelSpec(depth=1, name="L1", classes=["X", "Y", "Z"],
-                      class_to_idx={"X": 0, "Y": 1, "Z": 2}, parent_dims=[2]),
+            LevelSpec(
+                depth=0,
+                name="L0",
+                classes=["A", "B"],
+                class_to_idx={"A": 0, "B": 1},
+                parent_dims=[],
+            ),
+            LevelSpec(
+                depth=1,
+                name="L1",
+                classes=["X", "Y", "Z"],
+                class_to_idx={"X": 0, "Y": 1, "Z": 2},
+                parent_dims=[2],
+            ),
         ],
         text_column="text",
         embedding_model="test",
@@ -131,13 +141,27 @@ def _make_3level_model_and_taxonomy():
     taxonomy = TaxonomyInfo(
         name="test3",
         levels=[
-            LevelSpec(depth=0, name="L0", classes=["A", "B"],
-                      class_to_idx={"A": 0, "B": 1}, parent_dims=[]),
-            LevelSpec(depth=1, name="L1", classes=["X", "Y", "Z"],
-                      class_to_idx={"X": 0, "Y": 1, "Z": 2}, parent_dims=[2]),
-            LevelSpec(depth=2, name="L2", classes=["P", "Q", "R", "S"],
-                      class_to_idx={"P": 0, "Q": 1, "R": 2, "S": 3},
-                      parent_dims=[2, 3]),
+            LevelSpec(
+                depth=0,
+                name="L0",
+                classes=["A", "B"],
+                class_to_idx={"A": 0, "B": 1},
+                parent_dims=[],
+            ),
+            LevelSpec(
+                depth=1,
+                name="L1",
+                classes=["X", "Y", "Z"],
+                class_to_idx={"X": 0, "Y": 1, "Z": 2},
+                parent_dims=[2],
+            ),
+            LevelSpec(
+                depth=2,
+                name="L2",
+                classes=["P", "Q", "R", "S"],
+                class_to_idx={"P": 0, "Q": 1, "R": 2, "S": 3},
+                parent_dims=[2, 3],
+            ),
         ],
         text_column="text",
         embedding_model="test",
@@ -158,7 +182,8 @@ def test_diversity_preserved_across_levels():
     # Thresholds set so L1 (depth=1) is always "uncertain" (threshold=1.0)
     # This forces widening at depth 1 and sets diversity_depth=1
     clf = BeamSearchClassifier(
-        model, taxonomy,
+        model,
+        taxonomy,
         beam_width=3,
         confidence_thresholds={1: 1.0},  # impossible threshold → always widens
         adaptive_factor=2,
@@ -187,6 +212,4 @@ def test_diversity_preserved_across_levels():
     ]
     # With diversity pruning, we should have paths from different L1 classes
     l1_classes = {p.path[1] for p in all_paths}
-    assert len(l1_classes) >= 2, (
-        f"Expected diversity at L1 but only found classes: {l1_classes}"
-    )
+    assert len(l1_classes) >= 2, f"Expected diversity at L1 but only found classes: {l1_classes}"

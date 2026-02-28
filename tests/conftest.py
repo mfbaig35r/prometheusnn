@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from prometheus.data.taxonomy import TaxonomyInfo, LevelSpec
 from prometheus.data.splits import DataSplit
+from prometheus.data.taxonomy import LevelSpec, TaxonomyInfo
 
 
 @pytest.fixture
