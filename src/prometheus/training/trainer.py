@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import torch
 import torch.nn as nn
+from pydantic import BaseModel, Field
 from sklearn.metrics import confusion_matrix as sk_confusion_matrix
 
 from prometheus.data.splits import BatchIterator, DataSplit
@@ -20,16 +21,24 @@ from prometheus.training.noise import ParentNoiseInjector
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class TrainingConfig:
+class TrainingConfig(BaseModel):
+    """Hyperparameters and split ratios for `train_model`.
+
+    All fields have sensible defaults. Pass a partial dict from MCP clients
+    and Pydantic fills in the rest.
+    """
+
     epochs: int = 20
     learning_rate: float = 0.001
     batch_size: int = 64
     noise_rate: float = 0.15
     dropout: float = 0.3
-    hidden_dims: list[int] = field(default_factory=lambda: [256, 64])
+    hidden_dims: list[int] = Field(default_factory=lambda: [256, 64])
     early_stopping_patience: int = 5
     device: str = "cpu"
+    train_ratio: float = 0.80
+    val_ratio: float = 0.10
+    test_ratio: float = 0.10
 
 
 @dataclass

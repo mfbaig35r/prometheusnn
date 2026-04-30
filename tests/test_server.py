@@ -149,8 +149,7 @@ class TestTrainModel:
             text_column=TEXT_COL,
             level_columns=LEVEL_COLS,
             model_name="train_test",
-            epochs=2,
-            hidden_dims=[32, 16],
+            config=TrainingConfig(epochs=2, hidden_dims=[32, 16]),
         )
         assert result["status"] == "success"
         assert "metrics" in result

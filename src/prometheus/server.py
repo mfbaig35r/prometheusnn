@@ -226,15 +226,7 @@ def train_model(
     level_columns: list[str],
     model_name: str,
     embedding_model: str = "all-MiniLM-L6-v2",
-    epochs: int = 20,
-    batch_size: int = 64,
-    noise_rate: float = 0.15,
-    hidden_dims: list[int] | None = None,
-    dropout: float = 0.3,
-    learning_rate: float = 0.001,
-    train_ratio: float = 0.80,
-    val_ratio: float = 0.10,
-    test_ratio: float = 0.10,
+    config: TrainingConfig | None = None,
 ) -> dict:
     """Full training pipeline: embed → split → train N levels → calibrate → novelty → save.
 
@@ -244,24 +236,18 @@ def train_model(
         level_columns: Ordered label columns root → leaf
         model_name: Name for the saved model
         embedding_model: Sentence-transformer model name
-        epochs: Max training epochs per level
-        batch_size: Training batch size
-        noise_rate: Parent noise injection rate (0-1)
-        hidden_dims: Hidden layer dimensions (default [256, 64])
-        dropout: Dropout rate
-        learning_rate: Adam learning rate
-        train_ratio: Proportion for training set
-        val_ratio: Proportion for validation set
-        test_ratio: Proportion for test set
+        config: Optional training hyperparameters (epochs, batch_size, noise_rate,
+            hidden_dims, dropout, learning_rate, train_ratio, val_ratio, test_ratio).
+            All fields have sensible defaults — pass only what you want to override.
     """
+    config = config or TrainingConfig()
     logger.info(
         "tool=train_model model=%s file=%s levels=%s epochs=%d",
         model_name,
         file_path,
         level_columns,
-        epochs,
+        config.epochs,
     )
-    hidden_dims = hidden_dims or [256, 64]
     progress_log = []
 
     def log(msg: str):
@@ -275,24 +261,14 @@ def train_model(
         level_columns=level_columns,
         model_name=model_name,
         embedding_model=embedding_model,
-        train_ratio=train_ratio,
-        val_ratio=val_ratio,
-        test_ratio=test_ratio,
+        train_ratio=config.train_ratio,
+        val_ratio=config.val_ratio,
+        test_ratio=config.test_ratio,
     )
 
     embedding_dim = train_data.embeddings.shape[1]
     log(
         f"Data: {taxonomy.total_samples} samples, {taxonomy.num_levels} levels, {embedding_dim}d embeddings"
-    )
-
-    # Train
-    config = TrainingConfig(
-        epochs=epochs,
-        learning_rate=learning_rate,
-        batch_size=batch_size,
-        noise_rate=noise_rate,
-        dropout=dropout,
-        hidden_dims=hidden_dims,
     )
 
     model, result, noise_injector = run_training(
