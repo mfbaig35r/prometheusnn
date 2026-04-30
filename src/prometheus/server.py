@@ -31,6 +31,14 @@ from prometheus.insights import (
     build_model_health,
     build_training_insights,
 )
+from prometheus.intake import (
+    detect_problem_type,
+    estimate_training_time,
+    profile_columns,
+    recommend_next_steps,
+    scope_problem_from_text,
+    surface_concerns,
+)
 from prometheus.storage.model_store import (
     delete_model as delete_model_from_disk,
 )
@@ -50,7 +58,25 @@ mcp = FastMCP(
     instructions="""PrometheusNN — Generalized N-Level Cascade Classifier.
 
 Train, predict, evaluate, and tune hierarchical classifiers on any domain.
-Users provide a CSV with a text column + ordered label columns (root → leaf).
+The goal is a frictionless experience for users who may have minimal ML background:
+guide them from "I have data" or "I have an idea" to a working classifier.
+
+## Where to start (read this first)
+
+**For ANY new conversation about building a classifier, start with one of these two tools — not `analyze_training_data` directly:**
+
+- **`start_here(file_path, goal_description=None)`** — the user has a data file (CSV/JSON).
+  Profiles columns, detects whether it's a hierarchical/flat/multi-label problem,
+  surfaces concerns BEFORE training, and returns `next_steps` with pre-filled args
+  so you can fire the next tool call without guessing column names.
+
+- **`scope_problem(goal_description, data_hint=None)`** — the user describes a goal but
+  has no data yet. Returns whether Prometheus fits, what data they'll need, and
+  what to watch out for. If the goal isn't a fit (regression, clustering, NER),
+  returns a polite redirect.
+
+**Always treat `next_steps` as authoritative** — when `start_here` pre-fills args, use
+those exact values. Don't re-ask the user for column names it already detected.
 
 ## Input Format
 - **CSV/JSON** with one text column and N label columns
@@ -62,23 +88,26 @@ Users provide a CSV with a text column + ordered label columns (root → leaf).
 
 Use this when the user has training data and wants to build a new classifier.
 
-1. **Analyze first** — always call `analyze_training_data` before training.
-   - Check `warnings` for hierarchy inconsistencies (child mapping to multiple parents).
-   - Check `level_stats` for class imbalance — classes with <5 samples will train poorly.
-   - Show the user the summary and get confirmation before proceeding.
+1. **Start with `start_here(file_path)`** — returns the assessment, concerns, and
+   pre-filled next_steps. Show the user the recommended setup AND any concerns
+   (especially `severity: critical`) before proceeding.
 
-2. **Train** — call `train_model` with the user's parameters.
+2. **Run `analyze_training_data`** using the args from `next_steps[0].args`.
+   - Check `warnings` for additional issues that needed embedding to surface.
+   - Show the user the summary and get confirmation before training.
+
+3. **Train** — call `train_model` with the user's parameters.
    - Default `embedding_model` is `all-MiniLM-L6-v2` (384d, fast, good quality).
    - For higher accuracy, suggest `all-mpnet-base-v2` (768d, slower, best quality).
    - Use `list_embedding_models` if the user asks what's available.
    - Default `noise_rate=0.15` is well-tested. Only increase for very noisy taxonomies.
    - Report per-level val accuracy from the result. If any level is below 0.60, warn the user.
 
-3. **Evaluate** — call `evaluate_model` on held-out data (if available separately).
+4. **Evaluate** — call `evaluate_model` on held-out data (if available separately).
    - Compare per-level accuracy to training metrics to check for overfitting.
    - Check `routing_distribution` — if >50% are HUMAN_REVIEW, thresholds may be too tight.
 
-4. **Tune thresholds** — if routing distribution is unbalanced:
+5. **Tune thresholds** — if routing distribution is unbalanced:
    - Too many HUMAN_REVIEW → lower thresholds with `set_thresholds`
    - Too many AUTO_ACCEPT on wrong predictions → raise thresholds
    - Use `get_threshold_report` to see current values before changing.
@@ -169,8 +198,12 @@ Use this when deciding between models (e.g., different embedding models or hyper
 
 ## Tool Reference
 
+### Entry Points (USE THESE FIRST)
+- `start_here` — assess a CSV/JSON file: detect problem type, surface concerns, return pre-filled next_steps
+- `scope_problem` — assess a goal description (no data yet): is it a fit, what data is needed, what to watch for
+
 ### Training & Data
-- `analyze_training_data` — validate data before training (ALWAYS call first)
+- `analyze_training_data` — validate data before training (call after `start_here` confirms setup)
 - `train_model` — full pipeline: embed → split → train → calibrate → novelty → save
 - `resume_training` — fine-tune existing model with more data/epochs
 
@@ -266,6 +299,81 @@ def _get_predictor(model_name: str) -> CascadePredictor:
     )
     _predictor_cache[model_name] = predictor
     return predictor
+
+
+# ─── Entry Points ───
+
+
+@mcp.tool()
+def start_here(file_path: str, goal_description: str | None = None) -> dict:
+    """Entry point for users with a data file. Profiles columns, detects problem type, returns pre-filled next_steps.
+
+    Always call this FIRST when a user wants to build a classifier and has a CSV/JSON file.
+    Do not call analyze_training_data directly — use the args from this tool's
+    `next_steps[0].args` instead.
+
+    Args:
+        file_path: Path to a CSV or JSON file
+        goal_description: Optional free text describing what the user wants to build
+            (e.g., "classify support tickets by urgency"). Helps disambiguate when
+            the data shape is unclear.
+    """
+    try:
+        logger.info("tool=start_here file=%s", file_path)
+        df = load_dataframe(file_path)
+        profiles = profile_columns(df)
+        assessment = detect_problem_type(df, profiles, goal_description=goal_description)
+        next_steps = recommend_next_steps(file_path, assessment, profiles)
+        concerns = surface_concerns(df, assessment, profiles)
+
+        time_low, time_high = (0, 0)
+        if assessment.suggested_level_columns:
+            time_low, time_high = estimate_training_time(
+                rows=len(df),
+                num_levels=len(assessment.suggested_level_columns),
+            )
+
+        return success_response({
+            "data_summary": {
+                "rows": len(df),
+                "columns": [p.name for p in profiles],
+                "profiles": [p.to_dict() for p in profiles],
+            },
+            "assessment": assessment.to_dict(),
+            "concerns": [c.to_dict() for c in concerns],
+            "estimated_training_time_minutes": (
+                {"low": time_low, "high": time_high} if time_low else None
+            ),
+            "next_steps": [s.to_dict() for s in next_steps],
+        })
+    except FileNotFoundError:
+        return validation_error(f"File not found: {file_path}", field="file_path")
+    except Exception as e:
+        logger.error("start_here failed: %s", e, exc_info=True)
+        return internal_error(str(e))
+
+
+@mcp.tool()
+def scope_problem(goal_description: str, data_hint: str | None = None) -> dict:
+    """Entry point for users without data yet. Returns whether Prometheus fits the goal.
+
+    Use this when the user describes what they want to build but doesn't have a
+    file ready. Returns fits/doesn't-fit, what data they'll need, and watch-outs.
+    For non-fits, returns a polite redirect to the right tool.
+
+    Args:
+        goal_description: Free text describing the goal
+            (e.g., "classify customer emails into urgency levels")
+        data_hint: Optional hint about available data
+            (e.g., "I have ~3000 examples", "no labels yet")
+    """
+    try:
+        logger.info("tool=scope_problem goal=%s", goal_description[:80])
+        result = scope_problem_from_text(goal_description, data_hint)
+        return success_response(result.to_dict())
+    except Exception as e:
+        logger.error("scope_problem failed: %s", e, exc_info=True)
+        return internal_error(str(e))
 
 
 # ─── Training & Data ───
