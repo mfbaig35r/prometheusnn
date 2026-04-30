@@ -43,9 +43,15 @@ dev = [
     "pytest>=9.0",
     "ruff>=0.9",
 ]
+ui = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "websockets>=12.0",
+]
 
 [project.scripts]
 prometheusnn = "prometheus.server:main"
+prometheusnn-ui = "prometheus.ui_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/prometheus"]
