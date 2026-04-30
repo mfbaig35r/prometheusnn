@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -561,7 +560,7 @@ def train_model(
         )
     except Exception as e:
         logger.error("train_model failed: %s", e, exc_info=True)
-        return internal_error(str(e), traceback.format_exc())
+        return internal_error(str(e))
 
 
 @mcp.tool()
@@ -679,7 +678,7 @@ def resume_training(
         )
     except Exception as e:
         logger.error("resume_training failed: %s", e, exc_info=True)
-        return internal_error(str(e), traceback.format_exc())
+        return internal_error(str(e))
 
 
 def _analyze_forks(result) -> list[str]:
@@ -850,7 +849,7 @@ def predict_batch(
         )
     except Exception as e:
         logger.error("predict_batch failed: %s", e, exc_info=True)
-        return internal_error(str(e), traceback.format_exc())
+        return internal_error(str(e))
 
 
 @mcp.tool()
@@ -1115,7 +1114,7 @@ def build_code_mapping(
         )
     except Exception as e:
         logger.error("build_code_mapping failed: %s", e, exc_info=True)
-        return internal_error(str(e), traceback.format_exc())
+        return internal_error(str(e))
 
 
 # ─── Evaluation & Diagnostics ───
@@ -1199,7 +1198,7 @@ def evaluate_model(
         )
     except Exception as e:
         logger.error("evaluate_model failed: %s", e, exc_info=True)
-        return internal_error(str(e), traceback.format_exc())
+        return internal_error(str(e))
 
 
 @mcp.tool()
@@ -1315,7 +1314,7 @@ def get_confusion_matrix(
         )
     except Exception as e:
         logger.error("get_confusion_matrix failed: %s", e, exc_info=True)
-        return internal_error(str(e), traceback.format_exc())
+        return internal_error(str(e))
 
 
 @mcp.tool()
