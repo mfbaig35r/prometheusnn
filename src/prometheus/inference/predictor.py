@@ -44,7 +44,7 @@ class CascadePredictor:
         router: ThresholdRouter,
         device: torch.device | None = None,
         beam_width: int = 3,
-        parent_child_map: dict[str, list[int]] | None = None,
+        parent_child_map: dict[tuple[int, int], list[int]] | None = None,
         adaptive_factor: int = 2,
     ):
         self.device = device or torch.device("cpu")

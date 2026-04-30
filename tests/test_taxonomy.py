@@ -27,7 +27,7 @@ def test_level_spec_roundtrip():
         class_to_idx={"X": 0, "Y": 1},
         parent_dims=[3],
     )
-    restored = LevelSpec.from_dict(spec.to_dict())
+    restored = LevelSpec.model_validate(spec.model_dump())
     assert restored.depth == spec.depth
     assert restored.name == spec.name
     assert restored.classes == spec.classes

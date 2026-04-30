@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from functools import cached_property
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 
 
-@dataclass
-class LevelSpec:
+class LevelSpec(BaseModel):
     """Specification for a single taxonomy level."""
 
-    depth: int  # 0-indexed (0 = root)
-    name: str  # User-friendly name from CSV column
-    classes: list[str]  # Unique class labels at this level
-    class_to_idx: dict[str, int]  # Label -> integer mapping
-    parent_dims: list[int]  # [num_classes_L0, ...] for parent context
+    model_config = ConfigDict(ignored_types=(cached_property,))
+
+    depth: int
+    name: str
+    classes: list[str]
+    class_to_idx: dict[str, int]
+    parent_dims: list[int]
 
     @property
     def num_classes(self) -> int:
@@ -31,36 +34,48 @@ class LevelSpec:
     def decode(self, idx: int) -> str:
         return self.classes[idx]
 
-    def to_dict(self) -> dict:
-        return {
-            "depth": self.depth,
-            "name": self.name,
-            "classes": self.classes,
-            "class_to_idx": self.class_to_idx,
-            "parent_dims": self.parent_dims,
-        }
 
-    @classmethod
-    def from_dict(cls, data: dict) -> LevelSpec:
-        return cls(
-            depth=data["depth"],
-            name=data["name"],
-            classes=data["classes"],
-            class_to_idx=data["class_to_idx"],
-            parent_dims=data["parent_dims"],
-        )
+class ParentChildEntry(BaseModel):
+    """One row of the parent→valid_children mapping (JSON form)."""
+
+    depth: int
+    parent_idx: int
+    children: list[int]
 
 
-@dataclass
-class TaxonomyInfo:
-    """Complete taxonomy definition for N levels."""
+class TaxonomyInfo(BaseModel):
+    """Complete taxonomy definition for N levels.
+
+    ``parent_child_map`` is a tuple-keyed dict in memory (``(depth, parent_idx) → children``)
+    and serializes to a JSON-friendly list of records.
+    """
 
     name: str
     levels: list[LevelSpec]
     text_column: str
     embedding_model: str
     total_samples: int = 0
-    parent_child_map: dict[str, list[int]] | None = None
+    parent_child_map: dict[tuple[int, int], list[int]] | None = None
+
+    @field_validator("parent_child_map", mode="before")
+    @classmethod
+    def _accept_list_of_records(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return {(item["depth"], item["parent_idx"]): item["children"] for item in v}
+        return v
+
+    @field_serializer("parent_child_map")
+    def _serialize_pcm(
+        self,
+        v: dict[tuple[int, int], list[int]] | None,
+    ) -> list[dict] | None:
+        if v is None:
+            return None
+        return [
+            {"depth": d, "parent_idx": p, "children": list(c)} for (d, p), c in sorted(v.items())
+        ]
 
     @property
     def num_levels(self) -> int:
@@ -87,35 +102,12 @@ class TaxonomyInfo:
                 return level
         return None
 
-    def to_dict(self) -> dict:
-        d = {
-            "name": self.name,
-            "levels": [level.to_dict() for level in self.levels],
-            "text_column": self.text_column,
-            "embedding_model": self.embedding_model,
-            "total_samples": self.total_samples,
-        }
-        if self.parent_child_map is not None:
-            d["parent_child_map"] = self.parent_child_map
-        return d
-
-    @classmethod
-    def from_dict(cls, data: dict) -> TaxonomyInfo:
-        return cls(
-            name=data["name"],
-            levels=[LevelSpec.from_dict(level) for level in data["levels"]],
-            text_column=data["text_column"],
-            embedding_model=data["embedding_model"],
-            total_samples=data.get("total_samples", 0),
-            parent_child_map=data.get("parent_child_map"),
-        )
-
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), indent=2)
+        return self.model_dump_json(indent=2, exclude_none=True)
 
     @classmethod
     def from_json(cls, json_str: str) -> TaxonomyInfo:
-        return cls.from_dict(json.loads(json_str))
+        return cls.model_validate(json.loads(json_str))
 
     @classmethod
     def build(

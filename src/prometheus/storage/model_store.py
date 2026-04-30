@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 from prometheus.data.taxonomy import TaxonomyInfo
 from prometheus.training.cascade import HierarchicalClassifier
@@ -18,8 +18,7 @@ from prometheus.training.trainer import TrainingConfig, TrainingResult
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ModelManifest:
+class ModelManifest(BaseModel):
     """Single source of truth for a saved model."""
 
     taxonomy: TaxonomyInfo
@@ -29,39 +28,8 @@ class ModelManifest:
     threshold_config: dict
     embedding_dim: int
     created_at: str = ""
-    artifacts: dict = field(default_factory=dict)
+    artifacts: dict = Field(default_factory=dict)
     manifest_version: str = "1.0"
-
-    def to_dict(self) -> dict:
-        return {
-            "taxonomy": self.taxonomy.to_dict(),
-            "training_config": self.training_config,
-            "per_level_metrics": self.per_level_metrics,
-            "calibration_temperatures": {
-                str(k): v for k, v in self.calibration_temperatures.items()
-            },
-            "threshold_config": self.threshold_config,
-            "embedding_dim": self.embedding_dim,
-            "created_at": self.created_at,
-            "artifacts": self.artifacts,
-            "manifest_version": self.manifest_version,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> ModelManifest:
-        return cls(
-            taxonomy=TaxonomyInfo.from_dict(data["taxonomy"]),
-            training_config=data["training_config"],
-            per_level_metrics=data["per_level_metrics"],
-            calibration_temperatures={
-                int(k): v for k, v in data["calibration_temperatures"].items()
-            },
-            threshold_config=data["threshold_config"],
-            embedding_dim=data["embedding_dim"],
-            created_at=data.get("created_at", ""),
-            artifacts=data.get("artifacts", {}),
-            manifest_version=data.get("manifest_version", "1.0"),
-        )
 
 
 def generate_thresholds(num_levels: int, margin: float = 0.15) -> dict:
@@ -171,7 +139,7 @@ def save_model(
     )
 
     with open(path / "manifest.json", "w") as f:
-        json.dump(manifest.to_dict(), f, indent=2)
+        f.write(manifest.model_dump_json(indent=2))
 
     logger.info("Model saved to %s (manifest_version=%s)", path, manifest.manifest_version)
 
@@ -187,7 +155,7 @@ def load_model(
     path = Path(path)
 
     with open(path / "manifest.json") as f:
-        manifest = ModelManifest.from_dict(json.load(f))
+        manifest = ModelManifest.model_validate_json(f.read())
 
     logger.info("Loading model from %s (manifest_version=%s)", path, manifest.manifest_version)
     taxonomy = manifest.taxonomy

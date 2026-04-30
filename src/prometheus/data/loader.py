@@ -133,7 +133,7 @@ def prepare_data(
 
     # Build parent→valid_children map for hierarchical masking
     if len(level_columns) > 1:
-        pcm: dict[str, list[int]] = {}
+        pcm: dict[tuple[int, int], list[int]] = {}
         for depth in range(1, len(level_columns)):
             parent_col = level_columns[depth - 1]
             child_col = level_columns[depth]
@@ -143,7 +143,7 @@ def prepare_data(
                 child_vals = clean_df.loc[clean_df[parent_col] == parent_cls, child_col].unique()
                 child_indices = sorted(child_level.encode(c) for c in child_vals)
                 parent_idx = parent_level.encode(parent_cls)
-                pcm[f"{depth}:{parent_idx}"] = child_indices
+                pcm[(depth, parent_idx)] = child_indices
         taxonomy.parent_child_map = pcm
 
     # Encode texts

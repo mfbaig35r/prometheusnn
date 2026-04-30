@@ -56,7 +56,7 @@ class BeamSearchClassifier:
         device: torch.device | None = None,
         beam_width: int = 3,
         top_k_candidates: int = 3,
-        parent_child_map: dict[str, list[int]] | None = None,
+        parent_child_map: dict[tuple[int, int], list[int]] | None = None,
         confidence_thresholds: dict | None = None,
         adaptive_factor: int = 2,
     ):
@@ -141,7 +141,7 @@ class BeamSearchClassifier:
 
             # Mask invalid children if parent_child_map is available
             if self.parent_child_map is not None:
-                key = f"{depth}:{beam.indices[depth - 1]}"
+                key = (depth, beam.indices[depth - 1])
                 valid = self.parent_child_map.get(key)
                 if valid is not None:
                     mask = torch.full_like(logits, float("-inf"))
@@ -252,7 +252,7 @@ class GreedyClassifier:
         taxonomy: TaxonomyInfo,
         device: torch.device | None = None,
         top_k_candidates: int = 3,
-        parent_child_map: dict[str, list[int]] | None = None,
+        parent_child_map: dict[tuple[int, int], list[int]] | None = None,
     ):
         self.model = model
         self.taxonomy = taxonomy
@@ -280,7 +280,7 @@ class GreedyClassifier:
 
                 # Mask invalid children if parent_child_map is available
                 if depth > 0 and self.parent_child_map is not None:
-                    key = f"{depth}:{path_indices[-1]}"
+                    key = (depth, path_indices[-1])
                     valid = self.parent_child_map.get(key)
                     if valid is not None:
                         mask = torch.full_like(logits, float("-inf"))
