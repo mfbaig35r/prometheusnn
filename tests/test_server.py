@@ -43,7 +43,8 @@ def tmp_config(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_config", cfg)
     monkeypatch.setattr(server, "_predictor_cache", LRUCache(maxsize=8))
     monkeypatch.setattr(server, "_code_mapping_cache", LRUCache(maxsize=16))
-    monkeypatch.setattr("prometheus.server.encode_texts", _make_random_embeddings)
+    monkeypatch.setattr("prometheus.server.tools.inference.encode_texts", _make_random_embeddings)
+    monkeypatch.setattr("prometheus.server.tools.evaluation.encode_texts", _make_random_embeddings)
     monkeypatch.setattr("prometheus.data.loader.encode_texts", _make_random_embeddings)
     return cfg
 
