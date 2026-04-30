@@ -6,8 +6,23 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 
+from pydantic import BaseModel, Field
+
 from prometheus.inference.beam_search import BeamPath, CascadePrediction
 from prometheus.inference.novelty import NoveltyScore
+
+
+class RouterConfig(BaseModel):
+    """Typed configuration for ThresholdRouter (replaces the old mixed-key-type dict)."""
+
+    level_thresholds: dict[int, float] = Field(default_factory=dict)
+    margin: float = 0.15
+    z_score: float = 2.5
+    novelty_conf: float = 0.7
+    adaptive_factor: int = 2
+
+    def threshold_for_depth(self, depth: int) -> float:
+        return self.level_thresholds.get(depth, 0.75)
 
 
 class RoutingDecision(Enum):
@@ -39,15 +54,9 @@ class RoutingResult:
 class ThresholdRouter:
     """Routes predictions based on per-level confidence thresholds."""
 
-    def __init__(self, thresholds: dict, level_names: list[str]):
-        """
-        Args:
-            thresholds: {depth_int: confidence_threshold, "margin": float, "z_score": float, "novelty_conf": float}
-            level_names: ordered level names for display
-        """
-        self.thresholds = thresholds
+    def __init__(self, config: RouterConfig, level_names: list[str]):
+        self.config = config
         self.level_names = level_names
-        self.margin_threshold = thresholds.get("margin", 0.15)
 
     def route(self, prediction: CascadePrediction, novelty: NoveltyScore) -> RoutingResult:
         if novelty.is_novel:
@@ -65,7 +74,7 @@ class ThresholdRouter:
         review_reason = None
 
         for lp in prediction.level_predictions:
-            threshold = self.thresholds.get(lp.depth, 0.75)
+            threshold = self.config.threshold_for_depth(lp.depth)
             if lp.confidence >= threshold:
                 confident_path.append(lp.predicted)
                 confident_depth = lp.depth
@@ -76,13 +85,14 @@ class ThresholdRouter:
                 break
 
         # Check margin
+        margin_threshold = self.config.margin
         for lp in prediction.level_predictions[: len(confident_path)]:
-            if lp.margin < self.margin_threshold:
+            if lp.margin < margin_threshold:
                 idx = lp.depth
                 confident_path = confident_path[:idx]
                 confident_depth = idx - 1 if idx > 0 else None
                 review_reason = (
-                    f"{lp.name} margin too narrow ({lp.margin:.2f} < {self.margin_threshold:.2f})"
+                    f"{lp.name} margin too narrow ({lp.margin:.2f} < {margin_threshold:.2f})"
                 )
                 break
 

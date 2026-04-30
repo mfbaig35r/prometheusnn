@@ -13,16 +13,16 @@ from prometheus.training.trainer import TrainingConfig, train_model
 
 
 def test_generate_thresholds_4_levels():
-    t = generate_thresholds(4)
-    assert t[0] == 0.90
-    assert abs(t[1] - 0.85) < 1e-10
-    assert abs(t[2] - 0.80) < 1e-10
-    assert t[3] == 0.75
+    config = generate_thresholds(4)
+    assert config.level_thresholds[0] == 0.90
+    assert abs(config.level_thresholds[1] - 0.85) < 1e-10
+    assert abs(config.level_thresholds[2] - 0.80) < 1e-10
+    assert config.level_thresholds[3] == 0.75
 
 
 def test_generate_thresholds_1_level():
-    t = generate_thresholds(1)
-    assert t[0] == 0.90
+    config = generate_thresholds(1)
+    assert config.level_thresholds[0] == 0.90
 
 
 def test_save_load_roundtrip():

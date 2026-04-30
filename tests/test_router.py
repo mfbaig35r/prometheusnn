@@ -2,7 +2,11 @@
 
 from prometheus.inference.beam_search import CascadePrediction, LevelPrediction
 from prometheus.inference.novelty import NoveltyScore
-from prometheus.inference.router import RoutingDecision, ThresholdRouter
+from prometheus.inference.router import RouterConfig, RoutingDecision, ThresholdRouter
+
+
+def _config(**overrides) -> RouterConfig:
+    return RouterConfig(level_thresholds={0: 0.90, 1: 0.85, 2: 0.80}, margin=0.15, **overrides)
 
 
 def _make_prediction(confs, margins=None):
@@ -33,10 +37,7 @@ def _make_prediction(confs, margins=None):
 
 
 def test_auto_accept():
-    router = ThresholdRouter(
-        thresholds={0: 0.90, 1: 0.85, 2: 0.80, "margin": 0.15},
-        level_names=["Cat", "Sub", "Type"],
-    )
+    router = ThresholdRouter(_config(), level_names=["Cat", "Sub", "Type"])
     pred = _make_prediction([0.95, 0.90, 0.85])
     novelty = NoveltyScore(0.5, 0.5, 0.5, is_novel=False)
 
@@ -46,10 +47,7 @@ def test_auto_accept():
 
 
 def test_human_review_low_confidence():
-    router = ThresholdRouter(
-        thresholds={0: 0.90, 1: 0.85, 2: 0.80, "margin": 0.15},
-        level_names=["Cat", "Sub", "Type"],
-    )
+    router = ThresholdRouter(_config(), level_names=["Cat", "Sub", "Type"])
     pred = _make_prediction([0.95, 0.70, 0.85])  # L1 below threshold
     novelty = NoveltyScore(0.5, 0.5, 0.5, is_novel=False)
 
@@ -59,10 +57,7 @@ def test_human_review_low_confidence():
 
 
 def test_out_of_taxonomy():
-    router = ThresholdRouter(
-        thresholds={0: 0.90, 1: 0.85, 2: 0.80, "margin": 0.15},
-        level_names=["Cat", "Sub", "Type"],
-    )
+    router = ThresholdRouter(_config(), level_names=["Cat", "Sub", "Type"])
     pred = _make_prediction([0.95, 0.90, 0.85])
     novelty = NoveltyScore(10.0, 5.0, 5.0, is_novel=True)
 
@@ -71,10 +66,7 @@ def test_out_of_taxonomy():
 
 
 def test_narrow_margin_triggers_review():
-    router = ThresholdRouter(
-        thresholds={0: 0.90, 1: 0.85, 2: 0.80, "margin": 0.15},
-        level_names=["Cat", "Sub", "Type"],
-    )
+    router = ThresholdRouter(_config(), level_names=["Cat", "Sub", "Type"])
     pred = _make_prediction([0.95, 0.90, 0.85], margins=[0.05, 0.5, 0.5])
     novelty = NoveltyScore(0.5, 0.5, 0.5, is_novel=False)
 

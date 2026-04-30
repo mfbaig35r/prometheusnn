@@ -48,6 +48,7 @@ from prometheus.storage.model_store import (
     load_thresholds,
     save_code_mapping,
     save_model,
+    save_thresholds,
 )
 from prometheus.training.noise import ParentNoiseInjector
 from prometheus.training.trainer import TrainingConfig
@@ -90,27 +91,24 @@ def _get_predictor(model_name: str) -> CascadePredictor:
 
     model, manifest = load_model(model_path)
     taxonomy = manifest.taxonomy
-    thresholds = load_thresholds(model_path)
+    config = load_thresholds(model_path)
 
-    # Load novelty detector
     novelty = NoveltyDetector(
-        z_score_threshold=thresholds.get("z_score", 2.5),
+        z_score_threshold=config.z_score,
         knn_k=10,
-        novelty_conf_threshold=thresholds.get("novelty_conf", 0.70),
+        novelty_conf_threshold=config.novelty_conf,
     )
     if (model_path / "novelty_centroids.npz").exists():
         novelty.load(model_path)
 
-    adaptive_factor = int(thresholds.pop("adaptive_factor", 2))
-
-    router = ThresholdRouter(thresholds, taxonomy.level_names)
+    router = ThresholdRouter(config, taxonomy.level_names)
     predictor = CascadePredictor(
         model=model,
         taxonomy=taxonomy,
         novelty_detector=novelty,
         router=router,
         parent_child_map=taxonomy.parent_child_map,
-        adaptive_factor=adaptive_factor,
+        adaptive_factor=config.adaptive_factor,
     )
     _predictor_cache[model_name] = predictor
     return predictor
@@ -1094,7 +1092,7 @@ def get_threshold_report(model_name: str) -> dict:
     """
     logger.info("tool=get_threshold_report model=%s", model_name)
     model_path = _config.model_path(model_name)
-    thresholds = load_thresholds(model_path)
+    config = load_thresholds(model_path)
 
     _, manifest = load_model(model_path)
     taxonomy = manifest.taxonomy
@@ -1104,16 +1102,17 @@ def get_threshold_report(model_name: str) -> dict:
         level = taxonomy.get_level(depth)
         per_level[level.name] = {
             "depth": depth,
-            "threshold": thresholds.get(depth, 0.75),
+            "threshold": config.threshold_for_depth(depth),
         }
 
     return success_response(
         {
             "model_name": model_name,
             "per_level_thresholds": per_level,
-            "margin": thresholds.get("margin", 0.15),
-            "z_score": thresholds.get("z_score", 2.5),
-            "novelty_conf": thresholds.get("novelty_conf", 0.70),
+            "margin": config.margin,
+            "z_score": config.z_score,
+            "novelty_conf": config.novelty_conf,
+            "adaptive_factor": config.adaptive_factor,
         }
     )
 
@@ -1136,34 +1135,33 @@ def set_thresholds(
         list(thresholds.keys()),
     )
     model_path = _config.model_path(model_name)
-    current = load_thresholds(model_path)
+    config = load_thresholds(model_path)
 
     _, manifest = load_model(model_path)
     taxonomy = manifest.taxonomy
 
-    # Apply overrides
+    top_level_fields = {"margin", "z_score", "novelty_conf", "adaptive_factor"}
     for key, value in thresholds.items():
-        # Try as level name
+        if key in top_level_fields:
+            setattr(config, key, int(value) if key == "adaptive_factor" else float(value))
+            continue
         level = taxonomy.get_level_by_name(key)
         if level is not None:
-            current[level.depth] = value
-        else:
-            try:
-                current[int(key)] = value
-            except ValueError:
-                current[key] = value
+            config.level_thresholds[level.depth] = float(value)
+            continue
+        try:
+            config.level_thresholds[int(key)] = float(value)
+        except ValueError:
+            raise ToolValidationError(
+                f"Unknown threshold key: '{key}'. Expected a level name, a depth index, "
+                f"or one of {sorted(top_level_fields)}."
+            ) from None
 
-    # Save
-    with open(model_path / "thresholds.json", "w") as f:
-        json.dump({str(k): v for k, v in current.items()}, f, indent=2)
-
+    save_thresholds(model_path, config)
     _predictor_cache.pop(model_name, None)
 
     return success_response(
-        {
-            "model_name": model_name,
-            "thresholds": {str(k): v for k, v in current.items()},
-        },
+        {"model_name": model_name, "thresholds": config.model_dump()},
         "Thresholds updated",
     )
 

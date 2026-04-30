@@ -12,6 +12,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from prometheus.data.taxonomy import TaxonomyInfo
+from prometheus.inference.router import RouterConfig
 from prometheus.training.cascade import HierarchicalClassifier
 from prometheus.training.trainer import TrainingConfig, TrainingResult
 
@@ -25,25 +26,22 @@ class ModelManifest(BaseModel):
     training_config: dict
     per_level_metrics: dict
     calibration_temperatures: dict[int, float]
-    threshold_config: dict
+    threshold_config: RouterConfig
     embedding_dim: int
     created_at: str = ""
     artifacts: dict = Field(default_factory=dict)
     manifest_version: str = "1.0"
 
 
-def generate_thresholds(num_levels: int, margin: float = 0.15) -> dict:
+def generate_thresholds(num_levels: int, margin: float = 0.15) -> RouterConfig:
     """Generate linearly decaying thresholds from 0.90 (root) to 0.75 (leaf)."""
-    thresholds = {}
+    level_thresholds: dict[int, float] = {}
     for i in range(num_levels):
         if num_levels == 1:
-            thresholds[i] = 0.90
+            level_thresholds[i] = 0.90
         else:
-            thresholds[i] = 0.90 - i * (0.90 - 0.75) / (num_levels - 1)
-    thresholds["margin"] = margin
-    thresholds["z_score"] = 2.5
-    thresholds["novelty_conf"] = 0.70
-    return thresholds
+            level_thresholds[i] = 0.90 - i * (0.90 - 0.75) / (num_levels - 1)
+    return RouterConfig(level_thresholds=level_thresholds, margin=margin)
 
 
 def save_model(
@@ -57,7 +55,7 @@ def save_model(
     training_labels: np.ndarray | None = None,
     confusion_profiles: dict | None = None,
     centroids_data: dict | None = None,
-    thresholds: dict | None = None,
+    thresholds: RouterConfig | None = None,
 ):
     """Save a complete model to disk (no pickle)."""
     path = Path(path)
@@ -82,8 +80,7 @@ def save_model(
     # Generate thresholds if not provided
     if thresholds is None:
         thresholds = generate_thresholds(taxonomy.num_levels)
-    with open(path / "thresholds.json", "w") as f:
-        json.dump({str(k): v for k, v in thresholds.items()}, f, indent=2)
+    save_thresholds(path, thresholds)
 
     # Build per-level metrics for manifest
     per_level_metrics = {}
@@ -175,17 +172,16 @@ def load_model(
     return model, manifest
 
 
-def load_thresholds(path: Path) -> dict:
-    """Load thresholds from disk."""
+def load_thresholds(path: Path) -> RouterConfig:
+    """Load a RouterConfig from disk."""
     with open(path / "thresholds.json") as f:
-        raw = json.load(f)
-    result = {}
-    for k, v in raw.items():
-        try:
-            result[int(k)] = v
-        except ValueError:
-            result[k] = v
-    return result
+        return RouterConfig.model_validate_json(f.read())
+
+
+def save_thresholds(path: Path, config: RouterConfig) -> None:
+    """Save a RouterConfig to disk."""
+    with open(path / "thresholds.json", "w") as f:
+        f.write(config.model_dump_json(indent=2))
 
 
 def save_code_mapping(

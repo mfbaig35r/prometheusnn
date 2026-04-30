@@ -341,11 +341,11 @@ class TestInference:
 class TestThresholds:
     def test_auto_generated_thresholds_for_4_levels(self):
         """Should match the original parts-classifier values exactly."""
-        t = generate_thresholds(4)
-        assert t[0] == 0.90
-        assert t[1] == 0.85
-        assert t[2] == 0.80
-        assert t[3] == 0.75
+        config = generate_thresholds(4)
+        assert config.level_thresholds[0] == 0.90
+        assert config.level_thresholds[1] == 0.85
+        assert config.level_thresholds[2] == 0.80
+        assert config.level_thresholds[3] == 0.75
 
     def test_thresholds_save_load(self, trained_model, naics_taxonomy_and_splits):
         model, result, _, config = trained_model
@@ -363,10 +363,7 @@ class TestThresholds:
             )
 
             loaded = load_thresholds(model_path)
-            assert 0 in loaded
-            assert 1 in loaded
-            assert 2 in loaded
-            assert 3 in loaded
-            assert "margin" in loaded
-            assert loaded[0] == 0.90
-            assert loaded[3] == 0.75
+            assert set(loaded.level_thresholds.keys()) == {0, 1, 2, 3}
+            assert loaded.margin == 0.15
+            assert loaded.level_thresholds[0] == 0.90
+            assert loaded.level_thresholds[3] == 0.75

@@ -5,7 +5,7 @@ import numpy as np
 from prometheus.data.taxonomy import LevelSpec, TaxonomyInfo
 from prometheus.inference.novelty import NoveltyDetector
 from prometheus.inference.predictor import CascadePredictor
-from prometheus.inference.router import ThresholdRouter
+from prometheus.inference.router import RouterConfig, ThresholdRouter
 from prometheus.training.cascade import HierarchicalClassifier
 
 
@@ -45,14 +45,8 @@ def _make_predictor():
     novelty = NoveltyDetector()
     novelty.fit(embs, labels, ["b1", "b2", "b3"])
 
-    thresholds = {
-        0: 0.90,
-        1: 0.80,
-        "margin": 0.15,
-        "z_score": 2.5,
-        "novelty_conf": 0.70,
-    }
-    router = ThresholdRouter(thresholds, ["A", "B"])
+    config = RouterConfig(level_thresholds={0: 0.90, 1: 0.80})
+    router = ThresholdRouter(config, ["A", "B"])
 
     return CascadePredictor(model=model, taxonomy=taxonomy, novelty_detector=novelty, router=router)
 

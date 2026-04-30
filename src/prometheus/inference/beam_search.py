@@ -57,7 +57,7 @@ class BeamSearchClassifier:
         beam_width: int = 3,
         top_k_candidates: int = 3,
         parent_child_map: dict[tuple[int, int], list[int]] | None = None,
-        confidence_thresholds: dict | None = None,
+        confidence_thresholds: dict[int, float] | None = None,
         adaptive_factor: int = 2,
     ):
         self.model = model

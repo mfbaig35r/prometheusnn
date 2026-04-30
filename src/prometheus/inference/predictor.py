@@ -65,7 +65,7 @@ class CascadePredictor:
             device=self.device,
             beam_width=beam_width,
             parent_child_map=parent_child_map,
-            confidence_thresholds=router.thresholds,
+            confidence_thresholds=router.config.level_thresholds,
             adaptive_factor=adaptive_factor,
         )
 
