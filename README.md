@@ -1,24 +1,66 @@
 # PrometheusNN
 
-A hierarchical text classifier that learns any taxonomy. Feed it descriptions and labels at any depth — 2-level product categories, 6-level industry codes, whatever your domain needs — and it builds a cascade of specialized classifiers that know when they're confident, when they're uncertain, and when they're looking at something entirely new.
+Build a hierarchical text classifier without writing code. Point Claude (or any MCP client) at your data and it walks you from "I have a CSV" to a trained model — profiling your columns, detecting whether the problem fits, surfacing concerns before training, and recommending the right setup.
 
-## Why PrometheusNN
+PrometheusNN is the ML expert sitting next to you. You bring the data and the goal; it handles the rest.
 
-Most classifiers flatten your hierarchy into a single prediction. PrometheusNN preserves it. Each level gets its own classifier trained with noise injection from the level above, so deeper predictions stay robust even when parent levels are uncertain. Beam search explores alternative paths through the taxonomy. Calibrated confidence scores drive automatic routing decisions. Dual-signal novelty detection catches items that don't belong.
+## What this looks like
 
-The result: a system that doesn't just classify — it knows what it knows.
+```
+You:    I have a CSV of product descriptions and I want to categorize them.
+        Can you help?
 
-## Key Capabilities
+Claude: [calls start_here on the file]
 
-- **N-level cascade classification** — trains independent classifiers per taxonomy level with parent context
-- **Noise-injected training** — injects realistic parent errors during training so deeper levels learn to cope with upstream mistakes
-- **Beam search with adaptive widening** — explores alternative classification paths when confidence drops, with fork detection to surface disagreements
-- **Temperature-calibrated confidence** — post-hoc calibration produces probabilities you can trust for routing
-- **Dual-signal novelty detection** — centroid z-score + kNN distance flags out-of-taxonomy items without false positives
-- **Automatic routing** — AUTO_ACCEPT / HUMAN_REVIEW / OUT_OF_TAXONOMY with tunable per-level thresholds
-- **Feedback loop** — log corrections, retrain, improve
+        I looked at your data — 11,400 product descriptions across three
+        nested category levels (Chapter → Heading → Subheading). One thing
+        worth flagging before we train: the deepest level has ~2 examples
+        per class on average, which usually means poor accuracy at that
+        depth. Want to do all three levels, or simplify to the top two?
 
-## Architecture
+You:    Top two.
+
+Claude: [fires analyze_training_data → train_model with the simpler setup]
+
+        Done. Chapter accuracy 92%, Heading accuracy 78%. Want to try
+        classifying something?
+```
+
+No column-name guessing, no parameter cargo-culting, no premature training runs.
+
+## Install
+
+```bash
+pip install prometheusnn
+```
+
+Then add to your MCP client config (Claude Desktop, Cursor, Zed, etc.):
+
+```json
+{
+  "mcpServers": {
+    "prometheus": {
+      "command": "prometheusnn"
+    }
+  }
+}
+```
+
+That's it. Open your MCP client and start a conversation about classifying something.
+
+## How it works under the hood
+
+Two entry-point tools handle every new conversation:
+
+- **`start_here(file_path)`** — profiles your CSV, detects whether it's a hierarchical, flat, or multi-label classification problem, surfaces concerns before training, and returns pre-filled next steps so the LLM never has to guess column names.
+
+- **`scope_problem(goal_description)`** — for when you don't have data yet. Tells you whether Prometheus fits your goal, what data you'll need, and what to watch for. Politely redirects non-fits (regression, clustering, NER) to the right tools.
+
+From there, the LLM routes through the existing tool surface (training, evaluation, threshold tuning, prediction) based on what `start_here` recommended.
+
+## What's actually being built
+
+Under the conversational surface, PrometheusNN trains a cascade of neural network classifiers — one per level of your taxonomy — with parent-noise injection so deeper levels stay robust when upper levels are uncertain. Beam search explores alternative paths when confidence drops. Temperature calibration produces probabilities you can trust for routing. Dual-signal novelty detection catches items that don't belong.
 
 ```
 Text descriptions + taxonomy labels
@@ -43,40 +85,33 @@ Text descriptions + taxonomy labels
   └─────────────┘
 ```
 
-## Install
+You don't need to know any of this to use it — but it's there if you want to dig in.
 
-```bash
-uv pip install -e .
-```
+## Tool reference
 
-## Interface
+20 MCP tools total. The two you'll be told about; the rest the LLM picks for you.
 
-PrometheusNN exposes 23 tools via the [Model Context Protocol](https://modelcontextprotocol.io), making it accessible to any MCP-compatible client.
+**Entry points** (start here)
+- `start_here` — assess a file, detect problem type, return pre-filled next steps
+- `scope_problem` — assess a goal description (no data yet), check fit and data requirements
 
-Add to your MCP client config:
+**Training & data**
+- `analyze_training_data`, `train_model`, `resume_training`
 
-```json
-{
-  "mcpServers": {
-    "prometheus": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/prometheusnn", "prometheusnn"]
-    }
-  }
-}
-```
+**Inference**
+- `predict`, `predict_batch`, `classify_with_context`
 
-### Core Workflow
+**Model management**
+- `list_models`, `describe_model`, `delete_model`, `export_model`
 
-```
-1. analyze_training_data("data.csv", "text", ["Category", "Sub", "Type"])
-2. train_model("data.csv", "text", ["Category", "Sub", "Type"], "my_model")
-3. predict("my_model", "some item description")
-4. evaluate_model("my_model", "holdout.csv", "text", ["Category", "Sub", "Type"])
-5. set_thresholds("my_model", {"Category": 0.85, "Type": 0.70})
-```
+**Evaluation & tuning**
+- `evaluate_model`, `explain_prediction`, `get_confusion_matrix`
+- `get_threshold_report`, `set_thresholds`
 
-## Environment Variables
+**Other**
+- `submit_feedback`, `list_embedding_models`, `build_code_mapping`
+
+## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -86,8 +121,10 @@ Add to your MCP client config:
 ## Development
 
 ```bash
-uv sync --dev
-uv run python -m pytest tests/ -v --tb=short    # 151 tests
+git clone https://github.com/mfbaig35r/prometheusnn
+cd prometheusnn
+uv sync --extra dev
+uv run python -m pytest tests/ -v --tb=short    # 179 tests
 uv run ruff check src/ tests/                   # lint
 uv run ruff format --check src/ tests/          # format
 ```

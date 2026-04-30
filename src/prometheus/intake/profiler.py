@@ -88,8 +88,18 @@ def classify_column_kind(series: pd.Series, name: str | None = None) -> ColumnKi
 def _take_samples(series: pd.Series, n: int) -> list[str]:
     if len(series) == 0:
         return []
-    head = series.head(n).astype(str).tolist()
-    return [s if len(s) <= 80 else s[:77] + "..." for s in head]
+    str_series = series.astype(str)
+    seen: set[str] = set()
+    samples: list[str] = []
+    for value in str_series:
+        if value in seen:
+            continue
+        seen.add(value)
+        truncated = value if len(value) <= 80 else value[:77] + "..."
+        samples.append(truncated)
+        if len(samples) >= n:
+            break
+    return samples
 
 
 def _looks_like_datetime(str_series: pd.Series) -> bool:

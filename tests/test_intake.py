@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from prometheus.intake import (
     detect_problem_type,
@@ -16,7 +15,6 @@ from prometheus.intake import (
 from prometheus.intake.detector import detect_hierarchical_relationships
 from prometheus.intake.models import ColumnKind, ProblemType
 from prometheus.intake.profiler import classify_column_kind
-
 
 # ─── Profiler ───
 
@@ -63,6 +61,14 @@ def test_profiler_handles_nulls():
     df = pd.DataFrame({"col": ["a", "b", None, None, "c"]})
     profile = profile_columns(df)[0]
     assert profile.null_rate == 0.4
+
+
+def test_profiler_dedupes_sample_values():
+    """Sorted CSVs repeat the same value many times — samples should be unique."""
+    df = pd.DataFrame({"category": ["A"] * 50 + ["B"] * 50 + ["C"] * 50})
+    profile = profile_columns(df)[0]
+    assert profile.sample_values == ["A", "B", "C"]
+    assert len(profile.sample_values) == len(set(profile.sample_values))
 
 
 def test_classify_column_kind_id_by_name():
@@ -197,6 +203,20 @@ def test_scoper_classification_with_count():
 
 def test_scoper_hierarchical():
     r = scope_problem_from_text("classify products with 3 nested levels of categories")
+    assert r.fits_prometheus is True
+    assert r.detected_problem_type == ProblemType.HIERARCHICAL_CLASSIFICATION
+
+
+def test_scoper_does_not_treat_ordinal_levels_as_hierarchical():
+    """Regression: '8 urgency levels' is a flat ordinal classifier, not a hierarchy."""
+    r = scope_problem_from_text("classify support tickets into 8 urgency levels")
+    assert r.fits_prometheus is True
+    assert r.detected_problem_type == ProblemType.FLAT_CLASSIFICATION
+
+
+def test_scoper_hierarchical_via_pattern():
+    """'3 levels of categories' should match the pattern even without keyword."""
+    r = scope_problem_from_text("I have 4 levels of product categories to classify")
     assert r.fits_prometheus is True
     assert r.detected_problem_type == ProblemType.HIERARCHICAL_CLASSIFICATION
 

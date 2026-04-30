@@ -14,10 +14,13 @@ _CLASSIFICATION_KEYWORDS = {
 }
 
 _HIERARCHICAL_KEYWORDS = {
-    "hierarchy", "hierarchical", "nested", "tree", "taxonomy",
-    "levels", "subcategory", "sub-category", "subcategories",
-    "parent", "child", "branch",
+    "hierarchy", "hierarchical", "nested", "taxonomy",
+    "subcategory", "sub-category", "subcategories",
+    "nested levels", "levels of categories", "category levels",
+    "tree of categories", "parent category", "child category",
 }
+
+_HIERARCHICAL_PATTERN = re.compile(r"\b\d+\s+(?:nested\s+)?(?:levels?\s+of|tiers?\s+of)")
 
 _REGRESSION_KEYWORDS = {
     "regression", "forecast", "how much", "how many", "what price",
@@ -141,7 +144,9 @@ def scope_problem_from_text(
 
 
 def _build_fit_result(text: str, hint: str) -> ScopeResult:
-    is_hierarchical = _matches_any(text, _HIERARCHICAL_KEYWORDS)
+    is_hierarchical = _matches_any(text, _HIERARCHICAL_KEYWORDS) or bool(
+        _HIERARCHICAL_PATTERN.search(text)
+    )
     detected = (
         ProblemType.HIERARCHICAL_CLASSIFICATION
         if is_hierarchical

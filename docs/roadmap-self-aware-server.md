@@ -2,6 +2,8 @@
 
 Next steps for making Prometheus self-interpreting for cold users and LLMs.
 
+> **Status update (2026-04-29):** The "analyze_training_data Recommendations" and "Post-Training Diagnostics" sections below are partially addressed by the new `intake/` module — `start_here` profiles data, detects problem types, and `surface_concerns()` flags class-imbalance and sparsity issues *before* training. Domain Presets and Prediction Response Enhancements remain open.
+
 ## Done (2026-02-26)
 
 1. **Diversity-aware beam pruning** — `beam_search.py`: minority branches at uncertain levels guaranteed to survive pruning
