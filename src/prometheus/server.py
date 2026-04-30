@@ -14,7 +14,8 @@ from mcp.server.fastmcp import FastMCP
 from prometheus.core.config import PrometheusConfig
 from prometheus.core.embedding import encode_texts
 from prometheus.core.logging import setup_logging
-from prometheus.core.responses import internal_error, success_response, validation_error
+from prometheus.core.mcp_safety import ToolValidationError, mcp_tool_safe
+from prometheus.core.responses import success_response
 from prometheus.data.loader import (
     analyze_data,
     load_dataframe,
@@ -119,6 +120,7 @@ def _get_predictor(model_name: str) -> CascadePredictor:
 
 
 @mcp.tool()
+@mcp_tool_safe
 def start_here(file_path: str, goal_description: str | None = None) -> dict:
     """Entry point for users with a data file. Profiles columns, detects problem type, returns pre-filled next_steps.
 
@@ -132,58 +134,53 @@ def start_here(file_path: str, goal_description: str | None = None) -> dict:
             (e.g., "classify support tickets by urgency"). Helps disambiguate when
             the data shape is unclear.
     """
-    try:
-        logger.info("tool=start_here file=%s", file_path)
-        df = load_dataframe(file_path)
-        profiles = profile_columns(df)
-        assessment = detect_problem_type(df, profiles, goal_description=goal_description)
-        next_steps = recommend_next_steps(file_path, assessment, profiles)
-        concerns = surface_concerns(df, assessment, profiles)
+    logger.info("tool=start_here file=%s", file_path)
+    if not Path(file_path).exists():
+        raise ToolValidationError(f"File not found: {file_path}", field="file_path")
+    df = load_dataframe(file_path)
+    profiles = profile_columns(df)
+    assessment = detect_problem_type(df, profiles, goal_description=goal_description)
+    next_steps = recommend_next_steps(file_path, assessment, profiles)
+    concerns = surface_concerns(df, assessment, profiles)
 
-        time_low, time_high = (0, 0)
-        if assessment.suggested_level_columns:
-            time_low, time_high = estimate_training_time(
-                rows=len(df),
-                num_levels=len(assessment.suggested_level_columns),
-            )
-
-        relevant_names = set(assessment.suggested_level_columns)
-        if assessment.suggested_text_column:
-            relevant_names.add(assessment.suggested_text_column)
-        relevant_profiles = [p for p in profiles if p.name in relevant_names]
-        unused_columns = [p.name for p in profiles if p.name not in relevant_names]
-
-        return success_response(
-            {
-                "data_summary": {
-                    "rows": len(df),
-                    "columns": [p.name for p in profiles],
-                    "relevant_profiles": [
-                        p.model_dump(exclude_none=True) for p in relevant_profiles
-                    ],
-                    "unused_columns": unused_columns,
-                },
-                "assessment": assessment.model_dump(exclude_none=True),
-                "confidence_guide": (
-                    "0.9+ = strong signal, recommendation can be trusted; "
-                    "0.7-0.9 = good signal, worth confirming with the user; "
-                    "below 0.7 = weak signal, ask the user to clarify their goal."
-                ),
-                "concerns": [c.model_dump(exclude_none=True) for c in concerns],
-                "estimated_training_time_minutes": (
-                    {"low": time_low, "high": time_high} if time_low else None
-                ),
-                "next_steps": [s.model_dump(exclude_none=True) for s in next_steps],
-            }
+    time_low, time_high = (0, 0)
+    if assessment.suggested_level_columns:
+        time_low, time_high = estimate_training_time(
+            rows=len(df),
+            num_levels=len(assessment.suggested_level_columns),
         )
-    except FileNotFoundError:
-        return validation_error(f"File not found: {file_path}", field="file_path")
-    except Exception as e:
-        logger.error("start_here failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+
+    relevant_names = set(assessment.suggested_level_columns)
+    if assessment.suggested_text_column:
+        relevant_names.add(assessment.suggested_text_column)
+    relevant_profiles = [p for p in profiles if p.name in relevant_names]
+    unused_columns = [p.name for p in profiles if p.name not in relevant_names]
+
+    return success_response(
+        {
+            "data_summary": {
+                "rows": len(df),
+                "columns": [p.name for p in profiles],
+                "relevant_profiles": [p.model_dump(exclude_none=True) for p in relevant_profiles],
+                "unused_columns": unused_columns,
+            },
+            "assessment": assessment.model_dump(exclude_none=True),
+            "confidence_guide": (
+                "0.9+ = strong signal, recommendation can be trusted; "
+                "0.7-0.9 = good signal, worth confirming with the user; "
+                "below 0.7 = weak signal, ask the user to clarify their goal."
+            ),
+            "concerns": [c.model_dump(exclude_none=True) for c in concerns],
+            "estimated_training_time_minutes": (
+                {"low": time_low, "high": time_high} if time_low else None
+            ),
+            "next_steps": [s.model_dump(exclude_none=True) for s in next_steps],
+        }
+    )
 
 
 @mcp.tool()
+@mcp_tool_safe
 def scope_problem(goal_description: str, data_hint: str | None = None) -> dict:
     """Entry point for users without data yet. Returns whether Prometheus fits the goal.
 
@@ -197,19 +194,16 @@ def scope_problem(goal_description: str, data_hint: str | None = None) -> dict:
         data_hint: Optional hint about available data
             (e.g., "I have ~3000 examples", "no labels yet")
     """
-    try:
-        logger.info("tool=scope_problem goal=%s", goal_description[:80])
-        result = scope_problem_from_text(goal_description, data_hint)
-        return success_response(result)
-    except Exception as e:
-        logger.error("scope_problem failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    logger.info("tool=scope_problem goal=%s", goal_description[:80])
+    result = scope_problem_from_text(goal_description, data_hint)
+    return success_response(result)
 
 
 # ─── Training & Data ───
 
 
 @mcp.tool()
+@mcp_tool_safe
 def analyze_training_data(
     file_path: str,
     text_column: str,
@@ -222,15 +216,12 @@ def analyze_training_data(
         text_column: Name of the text/description column
         level_columns: Ordered label columns root → leaf (e.g., ["Category", "SubCategory", "Type"])
     """
-    try:
-        logger.info("tool=analyze_training_data file=%s levels=%s", file_path, level_columns)
-        return success_response(analyze_data(file_path, text_column, level_columns))
-    except Exception as e:
-        logger.error("analyze_training_data failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    logger.info("tool=analyze_training_data file=%s levels=%s", file_path, level_columns)
+    return success_response(analyze_data(file_path, text_column, level_columns))
 
 
 @mcp.tool()
+@mcp_tool_safe
 def train_model(
     file_path: str,
     text_column: str,
@@ -265,122 +256,118 @@ def train_model(
         val_ratio: Proportion for validation set
         test_ratio: Proportion for test set
     """
+    logger.info(
+        "tool=train_model model=%s file=%s levels=%s epochs=%d",
+        model_name,
+        file_path,
+        level_columns,
+        epochs,
+    )
+    hidden_dims = hidden_dims or [256, 64]
+    progress_log = []
+
+    def log(msg: str):
+        progress_log.append(msg)
+
+    # Prepare data
+    log("Loading and embedding data...")
+    taxonomy, train_data, val_data, test_data, warnings = prepare_data(
+        file_path=file_path,
+        text_column=text_column,
+        level_columns=level_columns,
+        model_name=model_name,
+        embedding_model=embedding_model,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+    )
+
+    embedding_dim = train_data.embeddings.shape[1]
+    log(
+        f"Data: {taxonomy.total_samples} samples, {taxonomy.num_levels} levels, {embedding_dim}d embeddings"
+    )
+
+    # Train
+    config = TrainingConfig(
+        epochs=epochs,
+        learning_rate=learning_rate,
+        batch_size=batch_size,
+        noise_rate=noise_rate,
+        dropout=dropout,
+        hidden_dims=hidden_dims,
+    )
+
+    model, result, noise_injector = run_training(
+        taxonomy=taxonomy,
+        train_data=train_data,
+        val_data=val_data,
+        embedding_dim=embedding_dim,
+        config=config,
+        progress_callback=log,
+    )
+
+    # Novelty detector
+    log("Fitting novelty detector...")
+    leaf = taxonomy.leaf_level
+    novelty = NoveltyDetector()
+    novelty.fit(
+        train_data.embeddings,
+        train_data.leaf_labels,
+        leaf.classes,
+    )
+
+    # Save
+    model_path = _config.model_path(model_name)
+    log(f"Saving model to {model_path}...")
+    save_model(
+        path=model_path,
+        model=model,
+        taxonomy=taxonomy,
+        result=result,
+        config=config,
+        embedding_dim=embedding_dim,
+        training_embeddings=train_data.embeddings,
+        confusion_profiles=result.confusion_profiles,
+        centroids_data=novelty.get_centroids_data(),
+    )
+
+    # Also save novelty files directly
+    novelty.save(model_path)
+
+    # Invalidate cache
+    _predictor_cache.pop(model_name, None)
+
+    # Build learning insights
     try:
-        logger.info(
-            "tool=train_model model=%s file=%s levels=%s epochs=%d",
-            model_name,
-            file_path,
-            level_columns,
-            epochs,
-        )
-        hidden_dims = hidden_dims or [256, 64]
-        progress_log = []
+        learning_insights = build_training_insights(result.level_metrics, taxonomy, train_data)
+    except Exception:
+        learning_insights = None
 
-        def log(msg: str):
-            progress_log.append(msg)
-
-        # Prepare data
-        log("Loading and embedding data...")
-        taxonomy, train_data, val_data, test_data, warnings = prepare_data(
-            file_path=file_path,
-            text_column=text_column,
-            level_columns=level_columns,
-            model_name=model_name,
-            embedding_model=embedding_model,
-            train_ratio=train_ratio,
-            val_ratio=val_ratio,
-            test_ratio=test_ratio,
-        )
-
-        embedding_dim = train_data.embeddings.shape[1]
-        log(
-            f"Data: {taxonomy.total_samples} samples, {taxonomy.num_levels} levels, {embedding_dim}d embeddings"
-        )
-
-        # Train
-        config = TrainingConfig(
-            epochs=epochs,
-            learning_rate=learning_rate,
-            batch_size=batch_size,
-            noise_rate=noise_rate,
-            dropout=dropout,
-            hidden_dims=hidden_dims,
-        )
-
-        model, result, noise_injector = run_training(
-            taxonomy=taxonomy,
-            train_data=train_data,
-            val_data=val_data,
-            embedding_dim=embedding_dim,
-            config=config,
-            progress_callback=log,
-        )
-
-        # Novelty detector
-        log("Fitting novelty detector...")
-        leaf = taxonomy.leaf_level
-        novelty = NoveltyDetector()
-        novelty.fit(
-            train_data.embeddings,
-            train_data.leaf_labels,
-            leaf.classes,
-        )
-
-        # Save
-        model_path = _config.model_path(model_name)
-        log(f"Saving model to {model_path}...")
-        save_model(
-            path=model_path,
-            model=model,
-            taxonomy=taxonomy,
-            result=result,
-            config=config,
-            embedding_dim=embedding_dim,
-            training_embeddings=train_data.embeddings,
-            confusion_profiles=result.confusion_profiles,
-            centroids_data=novelty.get_centroids_data(),
-        )
-
-        # Also save novelty files directly
-        novelty.save(model_path)
-
-        # Invalidate cache
-        _predictor_cache.pop(model_name, None)
-
-        # Build learning insights
-        try:
-            learning_insights = build_training_insights(result.level_metrics, taxonomy, train_data)
-        except Exception:
-            learning_insights = None
-
-        return success_response(
-            {
-                "model_name": model_name,
-                "taxonomy": {
-                    "num_levels": taxonomy.num_levels,
-                    "levels": [
-                        {"name": lvl.name, "num_classes": lvl.num_classes}
-                        for lvl in taxonomy.levels
-                    ],
-                    "total_samples": taxonomy.total_samples,
-                },
-                "metrics": result.summary(),
-                "splits": {
-                    "train": len(train_data),
-                    "val": len(val_data),
-                    "test": len(test_data),
-                },
-                "learning_insights": learning_insights,
-                "warnings": warnings,
-                "progress": progress_log,
-            }
-        )
-    except Exception as e:
-        logger.error("train_model failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(
+        {
+            "model_name": model_name,
+            "taxonomy": {
+                "num_levels": taxonomy.num_levels,
+                "levels": [
+                    {"name": lvl.name, "num_classes": lvl.num_classes} for lvl in taxonomy.levels
+                ],
+                "total_samples": taxonomy.total_samples,
+            },
+            "metrics": result.summary(),
+            "splits": {
+                "train": len(train_data),
+                "val": len(val_data),
+                "test": len(test_data),
+            },
+            "learning_insights": learning_insights,
+            "warnings": warnings,
+            "progress": progress_log,
+        }
+    )
 
 
 @mcp.tool()
+@mcp_tool_safe
 def resume_training(
     model_name: str,
     file_path: str,
@@ -399,103 +386,99 @@ def resume_training(
         text_column: Override text column (uses original if None)
         level_columns: Override level columns (uses original if None)
     """
-    try:
-        logger.info(
-            "tool=resume_training model=%s epochs=%d lr=%f",
-            model_name,
-            additional_epochs,
-            learning_rate,
-        )
-        model_path = _config.model_path(model_name)
-        model, manifest = load_model(model_path)
-        taxonomy = manifest.taxonomy
+    logger.info(
+        "tool=resume_training model=%s epochs=%d lr=%f",
+        model_name,
+        additional_epochs,
+        learning_rate,
+    )
+    model_path = _config.model_path(model_name)
+    model, manifest = load_model(model_path)
+    taxonomy = manifest.taxonomy
 
-        text_col = text_column or taxonomy.text_column
-        level_cols = level_columns or taxonomy.level_names
+    text_col = text_column or taxonomy.text_column
+    level_cols = level_columns or taxonomy.level_names
 
-        _, train_data, val_data, _, warnings = prepare_data(
-            file_path=file_path,
-            text_column=text_col,
-            level_columns=level_cols,
-            model_name=model_name,
-            embedding_model=taxonomy.embedding_model,
-        )
+    _, train_data, val_data, _, warnings = prepare_data(
+        file_path=file_path,
+        text_column=text_col,
+        level_columns=level_cols,
+        model_name=model_name,
+        embedding_model=taxonomy.embedding_model,
+    )
 
-        config = TrainingConfig(
-            epochs=additional_epochs,
-            learning_rate=learning_rate,
-            batch_size=manifest.training_config.get("batch_size", 64),
-            noise_rate=manifest.training_config.get("noise_rate", 0.15),
-            hidden_dims=manifest.training_config.get("hidden_dims", [256, 64]),
-            dropout=manifest.training_config.get("dropout", 0.3),
-        )
+    config = TrainingConfig(
+        epochs=additional_epochs,
+        learning_rate=learning_rate,
+        batch_size=manifest.training_config.get("batch_size", 64),
+        noise_rate=manifest.training_config.get("noise_rate", 0.15),
+        hidden_dims=manifest.training_config.get("hidden_dims", [256, 64]),
+        dropout=manifest.training_config.get("dropout", 0.3),
+    )
 
-        # Re-train using existing model weights (already loaded)
-        noise_injector = ParentNoiseInjector(noise_rate=config.noise_rate)
-        if (model_path / "confusion_profiles.json").exists():
-            with open(model_path / "confusion_profiles.json") as f:
-                noise_injector.load_profiles(json.load(f))
+    # Re-train using existing model weights (already loaded)
+    noise_injector = ParentNoiseInjector(noise_rate=config.noise_rate)
+    if (model_path / "confusion_profiles.json").exists():
+        with open(model_path / "confusion_profiles.json") as f:
+            noise_injector.load_profiles(json.load(f))
 
-        from prometheus.training.calibration import TemperatureScaler
-        from prometheus.training.trainer import TrainingResult, _train_level
+    from prometheus.training.calibration import TemperatureScaler
+    from prometheus.training.trainer import TrainingResult, _train_level
 
-        # Build HierarchicalClassifier wrapper around loaded model
-        embedding_dim = manifest.embedding_dim
-        level_metrics = []
-        num_classes = taxonomy.num_classes_per_level
+    # Build HierarchicalClassifier wrapper around loaded model
+    embedding_dim = manifest.embedding_dim
+    level_metrics = []
+    num_classes = taxonomy.num_classes_per_level
 
-        for depth in range(taxonomy.num_levels):
-            level = taxonomy.get_level(depth)
-            metrics = _train_level(
-                model=model,
-                depth=depth,
-                level_name=level.name,
-                train_data=train_data,
-                val_data=val_data,
-                parent_depths=list(range(depth)),
-                num_classes=num_classes,
-                noise_injector=noise_injector,
-                config=config,
-                device=torch.device("cpu"),
-            )
-            noise_injector.build_confusion_profile(depth, metrics.confusion_matrix)
-            level_metrics.append(metrics)
-
-        # Re-calibrate
-        scaler = TemperatureScaler(model)
-        calib_results = scaler.calibrate_all(val_data, num_classes)
-        for depth, cr in calib_results.items():
-            level_metrics[depth].calibration = cr
-
-        result = TrainingResult(
-            level_metrics=level_metrics,
-            confusion_profiles=noise_injector.get_serializable_profiles(),
-        )
-
-        save_model(
-            path=model_path,
+    for depth in range(taxonomy.num_levels):
+        level = taxonomy.get_level(depth)
+        metrics = _train_level(
             model=model,
-            taxonomy=taxonomy,
-            result=result,
+            depth=depth,
+            level_name=level.name,
+            train_data=train_data,
+            val_data=val_data,
+            parent_depths=list(range(depth)),
+            num_classes=num_classes,
+            noise_injector=noise_injector,
             config=config,
-            embedding_dim=embedding_dim,
-            training_embeddings=train_data.embeddings,
-            confusion_profiles=result.confusion_profiles,
+            device=torch.device("cpu"),
         )
+        noise_injector.build_confusion_profile(depth, metrics.confusion_matrix)
+        level_metrics.append(metrics)
 
-        _predictor_cache.pop(model_name, None)
+    # Re-calibrate
+    scaler = TemperatureScaler(model)
+    calib_results = scaler.calibrate_all(val_data, num_classes)
+    for depth, cr in calib_results.items():
+        level_metrics[depth].calibration = cr
 
-        return success_response(
-            {
-                "model_name": model_name,
-                "additional_epochs": additional_epochs,
-                "metrics": result.summary(),
-                "warnings": warnings,
-            }
-        )
-    except Exception as e:
-        logger.error("resume_training failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    result = TrainingResult(
+        level_metrics=level_metrics,
+        confusion_profiles=noise_injector.get_serializable_profiles(),
+    )
+
+    save_model(
+        path=model_path,
+        model=model,
+        taxonomy=taxonomy,
+        result=result,
+        config=config,
+        embedding_dim=embedding_dim,
+        training_embeddings=train_data.embeddings,
+        confusion_profiles=result.confusion_profiles,
+    )
+
+    _predictor_cache.pop(model_name, None)
+
+    return success_response(
+        {
+            "model_name": model_name,
+            "additional_epochs": additional_epochs,
+            "metrics": result.summary(),
+            "warnings": warnings,
+        }
+    )
 
 
 def _analyze_forks(result) -> list[str]:
@@ -542,6 +525,7 @@ def _analyze_forks(result) -> list[str]:
 
 
 @mcp.tool()
+@mcp_tool_safe
 def predict(
     model_name: str,
     text: str,
@@ -554,50 +538,47 @@ def predict(
         text: Text description to classify
         beam_width: Beam width for search (1 = greedy)
     """
-    try:
-        logger.info("tool=predict model=%s beam_width=%d", model_name, beam_width)
-        predictor = _get_predictor(model_name)
-        taxonomy = predictor.taxonomy
+    logger.info("tool=predict model=%s beam_width=%d", model_name, beam_width)
+    predictor = _get_predictor(model_name)
+    taxonomy = predictor.taxonomy
 
-        embedding = encode_texts([text], taxonomy.embedding_model, show_progress=False)[0]
-        result = predictor.predict(
-            embedding,
-            text=text,
-            use_beam_search=(beam_width > 1),
-            beam_width=beam_width if beam_width > 1 else None,
-        )
+    embedding = encode_texts([text], taxonomy.embedding_model, show_progress=False)[0]
+    result = predictor.predict(
+        embedding,
+        text=text,
+        use_beam_search=(beam_width > 1),
+        beam_width=beam_width if beam_width > 1 else None,
+    )
 
-        response = {
-            "prediction_id": result.prediction_id,
-            "path": result.path,
-            "predictions": result.predictions,
-            "path_score": result.path_score,
-            "novelty": result.novelty,
-            "routing": result.routing,
-        }
-        if result.forked_completions:
-            response["forked_completions"] = result.forked_completions
-            insights = _analyze_forks(result)
-            if insights:
-                response["insights"] = insights
+    response = {
+        "prediction_id": result.prediction_id,
+        "path": result.path,
+        "predictions": result.predictions,
+        "path_score": result.path_score,
+        "novelty": result.novelty,
+        "routing": result.routing,
+    }
+    if result.forked_completions:
+        response["forked_completions"] = result.forked_completions
+        insights = _analyze_forks(result)
+        if insights:
+            response["insights"] = insights
 
-        code_mapping = _get_code_mapping(model_name)
-        response["summary"] = build_prediction_summary(
-            predictions=response["predictions"],
-            forked_completions=response.get("forked_completions"),
-            routing=response["routing"],
-            path_score=response["path_score"],
-            level_names=predictor.taxonomy.level_names,
-            code_mapping=code_mapping,
-        )
+    code_mapping = _get_code_mapping(model_name)
+    response["summary"] = build_prediction_summary(
+        predictions=response["predictions"],
+        forked_completions=response.get("forked_completions"),
+        routing=response["routing"],
+        path_score=response["path_score"],
+        level_names=predictor.taxonomy.level_names,
+        code_mapping=code_mapping,
+    )
 
-        return success_response(response)
-    except Exception as e:
-        logger.error("predict failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(response)
 
 
 @mcp.tool()
+@mcp_tool_safe
 def predict_batch(
     model_name: str,
     file_path: str,
@@ -614,62 +595,59 @@ def predict_batch(
         output_path: Path to write results CSV (optional)
         beam_width: Beam width for search (1 = greedy)
     """
-    try:
-        logger.info(
-            "tool=predict_batch model=%s file=%s beam_width=%d",
-            model_name,
-            file_path,
-            beam_width,
-        )
-        predictor = _get_predictor(model_name)
-        taxonomy = predictor.taxonomy
+    logger.info(
+        "tool=predict_batch model=%s file=%s beam_width=%d",
+        model_name,
+        file_path,
+        beam_width,
+    )
+    predictor = _get_predictor(model_name)
+    taxonomy = predictor.taxonomy
 
-        df = load_dataframe(file_path)
-        if text_column not in df.columns:
-            return validation_error(f"Column '{text_column}' not found", field="text_column")
+    df = load_dataframe(file_path)
+    if text_column not in df.columns:
+        raise ToolValidationError(f"Column '{text_column}' not found", field="text_column")
 
-        texts = df[text_column].tolist()
-        embeddings = encode_texts(texts, taxonomy.embedding_model)
+    texts = df[text_column].tolist()
+    embeddings = encode_texts(texts, taxonomy.embedding_model)
 
-        results = predictor.predict_batch(
-            embeddings,
-            texts=texts,
-            use_beam_search=(beam_width > 1),
-            beam_width=beam_width if beam_width > 1 else None,
-        )
+    results = predictor.predict_batch(
+        embeddings,
+        texts=texts,
+        use_beam_search=(beam_width > 1),
+        beam_width=beam_width if beam_width > 1 else None,
+    )
 
-        # Build output
-        rows = []
-        for r in results:
-            row = {"text": r.input_text}
-            for p in r.predictions:
-                row[p["level"]] = p["predicted"]
-                row[f"{p['level']}_confidence"] = p["confidence"]
-            row["routing"] = r.routing["decision"]
-            row["path_score"] = r.path_score
-            rows.append(row)
+    # Build output
+    rows = []
+    for r in results:
+        row = {"text": r.input_text}
+        for p in r.predictions:
+            row[p["level"]] = p["predicted"]
+            row[f"{p['level']}_confidence"] = p["confidence"]
+        row["routing"] = r.routing["decision"]
+        row["path_score"] = r.path_score
+        rows.append(row)
 
-        out_df = pd.DataFrame(rows)
+    out_df = pd.DataFrame(rows)
 
-        if output_path:
-            out_df.to_csv(output_path, index=False)
+    if output_path:
+        out_df.to_csv(output_path, index=False)
 
-        routing_counts = out_df["routing"].value_counts().to_dict()
+    routing_counts = out_df["routing"].value_counts().to_dict()
 
-        return success_response(
-            {
-                "total_items": len(results),
-                "routing_distribution": routing_counts,
-                "output_path": output_path,
-                "sample_predictions": rows[:5],
-            }
-        )
-    except Exception as e:
-        logger.error("predict_batch failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(
+        {
+            "total_items": len(results),
+            "routing_distribution": routing_counts,
+            "output_path": output_path,
+            "sample_predictions": rows[:5],
+        }
+    )
 
 
 @mcp.tool()
+@mcp_tool_safe
 def classify_with_context(
     model_name: str,
     text: str,
@@ -682,150 +660,138 @@ def classify_with_context(
         text: Text to classify
         known_levels: Dict of {level_name: known_value} for upper levels
     """
-    try:
-        logger.info(
-            "tool=classify_with_context model=%s known=%s",
-            model_name,
-            list(known_levels.keys()),
-        )
-        predictor = _get_predictor(model_name)
-        taxonomy = predictor.taxonomy
+    logger.info(
+        "tool=classify_with_context model=%s known=%s",
+        model_name,
+        list(known_levels.keys()),
+    )
+    predictor = _get_predictor(model_name)
+    taxonomy = predictor.taxonomy
 
-        embedding = encode_texts([text], taxonomy.embedding_model, show_progress=False)[0]
-        emb_tensor = torch.tensor(embedding, dtype=torch.float32).unsqueeze(0)
+    embedding = encode_texts([text], taxonomy.embedding_model, show_progress=False)[0]
+    emb_tensor = torch.tensor(embedding, dtype=torch.float32).unsqueeze(0)
 
-        model = predictor.model
-        model.eval()
+    model = predictor.model
+    model.eval()
 
-        path_labels = []
-        path_confs = []
-        context_parts = []
+    path_labels = []
+    path_confs = []
+    context_parts = []
 
-        with torch.no_grad():
-            for depth in range(taxonomy.num_levels):
-                level = taxonomy.get_level(depth)
-                classifier = model.get_level(depth)
+    with torch.no_grad():
+        for depth in range(taxonomy.num_levels):
+            level = taxonomy.get_level(depth)
+            classifier = model.get_level(depth)
 
-                context = torch.cat(context_parts, dim=-1) if context_parts else None
+            context = torch.cat(context_parts, dim=-1) if context_parts else None
 
-                if level.name in known_levels:
-                    # Use known value
-                    known_val = known_levels[level.name]
-                    pred_idx = level.encode(known_val)
-                    path_labels.append(known_val)
-                    path_confs.append(1.0)
-                else:
-                    # Predict
-                    logits = classifier(emb_tensor, context)
-                    probs = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
-                    pred_idx = int(probs.argmax())
-                    path_labels.append(level.classes[pred_idx])
-                    path_confs.append(float(probs[pred_idx]))
+            if level.name in known_levels:
+                # Use known value
+                known_val = known_levels[level.name]
+                pred_idx = level.encode(known_val)
+                path_labels.append(known_val)
+                path_confs.append(1.0)
+            else:
+                # Predict
+                logits = classifier(emb_tensor, context)
+                probs = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
+                pred_idx = int(probs.argmax())
+                path_labels.append(level.classes[pred_idx])
+                path_confs.append(float(probs[pred_idx]))
 
-                one_hot = torch.zeros(1, level.num_classes)
-                one_hot[0, pred_idx] = 1.0
-                context_parts.append(one_hot)
+            one_hot = torch.zeros(1, level.num_classes)
+            one_hot[0, pred_idx] = 1.0
+            context_parts.append(one_hot)
 
-        return success_response(
-            {
-                "path": path_labels,
-                "confidences": [round(c, 4) for c in path_confs],
-                "known_levels": known_levels,
-            }
-        )
-    except Exception as e:
-        logger.error("classify_with_context failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(
+        {
+            "path": path_labels,
+            "confidences": [round(c, 4) for c in path_confs],
+            "known_levels": known_levels,
+        }
+    )
 
 
 # ─── Model Management ───
 
 
 @mcp.tool()
+@mcp_tool_safe
 def list_models() -> dict:
     """List all trained models with summary stats."""
-    try:
-        logger.info("tool=list_models")
-        models = []
-        for name in _config.list_models():
-            try:
-                with open(_config.model_path(name) / "manifest.json") as f:
-                    manifest = json.load(f)
-                models.append(
-                    {
-                        "name": name,
-                        "num_levels": len(manifest["taxonomy"]["levels"]),
-                        "level_names": [lvl["name"] for lvl in manifest["taxonomy"]["levels"]],
-                        "total_samples": manifest["taxonomy"].get("total_samples", 0),
-                        "embedding_model": manifest["taxonomy"]["embedding_model"],
-                        "created_at": manifest.get("created_at", "unknown"),
-                    }
-                )
-            except Exception:
-                models.append({"name": name, "error": "Failed to read manifest"})
+    logger.info("tool=list_models")
+    models = []
+    for name in _config.list_models():
+        try:
+            with open(_config.model_path(name) / "manifest.json") as f:
+                manifest = json.load(f)
+            models.append(
+                {
+                    "name": name,
+                    "num_levels": len(manifest["taxonomy"]["levels"]),
+                    "level_names": [lvl["name"] for lvl in manifest["taxonomy"]["levels"]],
+                    "total_samples": manifest["taxonomy"].get("total_samples", 0),
+                    "embedding_model": manifest["taxonomy"]["embedding_model"],
+                    "created_at": manifest.get("created_at", "unknown"),
+                }
+            )
+        except Exception:
+            models.append({"name": name, "error": "Failed to read manifest"})
 
-        return success_response({"models": models, "count": len(models)})
-    except Exception as e:
-        logger.error("list_models failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response({"models": models, "count": len(models)})
 
 
 @mcp.tool()
+@mcp_tool_safe
 def describe_model(model_name: str) -> dict:
     """Get full model details: taxonomy, metrics, thresholds, config.
 
     Args:
         model_name: Name of the model to describe
     """
+    logger.info("tool=describe_model model=%s", model_name)
+    model_path = _config.model_path(model_name)
+    if not (model_path / "manifest.json").exists():
+        raise ToolValidationError(f"Model '{model_name}' not found")
+
+    with open(model_path / "manifest.json") as f:
+        manifest = json.load(f)
+
     try:
-        logger.info("tool=describe_model model=%s", model_name)
-        model_path = _config.model_path(model_name)
-        if not (model_path / "manifest.json").exists():
-            return validation_error(f"Model '{model_name}' not found")
+        model_health = build_model_health(manifest)
+    except Exception:
+        model_health = None
 
-        with open(model_path / "manifest.json") as f:
-            manifest = json.load(f)
-
-        try:
-            model_health = build_model_health(manifest)
-        except Exception:
-            model_health = None
-
-        return success_response(
-            {
-                "model_name": model_name,
-                "manifest": manifest,
-                "model_health": model_health,
-            }
-        )
-    except Exception as e:
-        logger.error("describe_model failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(
+        {
+            "model_name": model_name,
+            "manifest": manifest,
+            "model_health": model_health,
+        }
+    )
 
 
 @mcp.tool()
+@mcp_tool_safe
 def delete_model(model_name: str) -> dict:
     """Delete a model from disk.
 
     Args:
         model_name: Name of the model to delete
     """
-    try:
-        logger.info("tool=delete_model model=%s", model_name)
-        model_path = _config.model_path(model_name)
-        if not model_path.exists():
-            return validation_error(f"Model '{model_name}' not found")
+    logger.info("tool=delete_model model=%s", model_name)
+    model_path = _config.model_path(model_name)
+    if not model_path.exists():
+        raise ToolValidationError(f"Model '{model_name}' not found")
 
-        delete_model_from_disk(model_path)
-        _predictor_cache.pop(model_name, None)
+    delete_model_from_disk(model_path)
+    _predictor_cache.pop(model_name, None)
 
-        return success_response(None, f"Model '{model_name}' deleted")
-    except Exception as e:
-        logger.error("delete_model failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(None, f"Model '{model_name}' deleted")
 
 
 @mcp.tool()
+@mcp_tool_safe
 def export_model(
     model_name: str,
     output_path: str,
@@ -836,29 +802,26 @@ def export_model(
         model_name: Name of the model to export
         output_path: Destination directory
     """
-    try:
-        logger.info("tool=export_model model=%s dest=%s", model_name, output_path)
-        import shutil
+    logger.info("tool=export_model model=%s dest=%s", model_name, output_path)
+    import shutil
 
-        model_path = _config.model_path(model_name)
-        if not model_path.exists():
-            return validation_error(f"Model '{model_name}' not found")
+    model_path = _config.model_path(model_name)
+    if not model_path.exists():
+        raise ToolValidationError(f"Model '{model_name}' not found")
 
-        dest = Path(output_path)
-        if dest.exists():
-            return validation_error(f"Destination already exists: {output_path}")
+    dest = Path(output_path)
+    if dest.exists():
+        raise ToolValidationError(f"Destination already exists: {output_path}")
 
-        shutil.copytree(model_path, dest)
-        return success_response({"exported_to": str(dest)})
-    except Exception as e:
-        logger.error("export_model failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    shutil.copytree(model_path, dest)
+    return success_response({"exported_to": str(dest)})
 
 
 # ─── Code Mapping ───
 
 
 @mcp.tool()
+@mcp_tool_safe
 def build_code_mapping(
     model_name: str,
     file_path: str,
@@ -876,68 +839,65 @@ def build_code_mapping(
         code_column: Column containing codes (e.g., "hts8", "naics_code")
         level_columns: Ordered label columns (defaults to model's taxonomy level names)
     """
-    try:
-        logger.info("tool=build_code_mapping model=%s code_col=%s", model_name, code_column)
-        model_path = _config.model_path(model_name)
-        if not (model_path / "manifest.json").exists():
-            return validation_error(f"Model '{model_name}' not found")
+    logger.info("tool=build_code_mapping model=%s code_col=%s", model_name, code_column)
+    model_path = _config.model_path(model_name)
+    if not (model_path / "manifest.json").exists():
+        raise ToolValidationError(f"Model '{model_name}' not found")
 
-        with open(model_path / "manifest.json") as f:
-            manifest = json.load(f)
+    with open(model_path / "manifest.json") as f:
+        manifest = json.load(f)
 
-        taxonomy_levels = [lvl["name"] for lvl in manifest["taxonomy"]["levels"]]
-        cols = level_columns or taxonomy_levels
+    taxonomy_levels = [lvl["name"] for lvl in manifest["taxonomy"]["levels"]]
+    cols = level_columns or taxonomy_levels
 
-        df = load_dataframe(file_path)
+    df = load_dataframe(file_path)
 
-        # Validate columns exist
-        missing = [c for c in cols + [code_column] if c not in df.columns]
-        if missing:
-            return validation_error(f"Columns not found: {missing}")
+    # Validate columns exist
+    missing = [c for c in cols + [code_column] if c not in df.columns]
+    if missing:
+        raise ToolValidationError(f"Columns not found: {missing}")
 
-        # Drop rows with missing values in required columns
-        df = df.dropna(subset=cols + [code_column]).reset_index(drop=True)
+    # Drop rows with missing values in required columns
+    df = df.dropna(subset=cols + [code_column]).reset_index(drop=True)
 
-        # Build mapping: pipe-delimited path → sorted deduplicated code list
-        mapping: dict[str, list[str]] = {}
-        for _, row in df.iterrows():
-            path_key = "|".join(str(row[c]) for c in cols)
-            code = str(row[code_column]).strip()
-            if path_key not in mapping:
-                mapping[path_key] = set()
-            mapping[path_key].add(code)
+    # Build mapping: pipe-delimited path → sorted deduplicated code list
+    mapping: dict[str, list[str]] = {}
+    for _, row in df.iterrows():
+        path_key = "|".join(str(row[c]) for c in cols)
+        code = str(row[code_column]).strip()
+        if path_key not in mapping:
+            mapping[path_key] = set()
+        mapping[path_key].add(code)
 
-        # Convert sets to sorted lists
-        mapping = {k: sorted(v) for k, v in mapping.items()}
+    # Convert sets to sorted lists
+    mapping = {k: sorted(v) for k, v in mapping.items()}
 
-        save_code_mapping(model_path, code_column, cols, mapping)
-        _code_mapping_cache.pop(model_name, None)
+    save_code_mapping(model_path, code_column, cols, mapping)
+    _code_mapping_cache.pop(model_name, None)
 
-        multi_code_paths = sum(1 for v in mapping.values() if len(v) > 1)
-        all_codes = set()
-        for codes in mapping.values():
-            all_codes.update(codes)
+    multi_code_paths = sum(1 for v in mapping.values() if len(v) > 1)
+    all_codes = set()
+    for codes in mapping.values():
+        all_codes.update(codes)
 
-        return success_response(
-            {
-                "model_name": model_name,
-                "code_column": code_column,
-                "level_columns": cols,
-                "unique_paths": len(mapping),
-                "unique_codes": len(all_codes),
-                "multi_code_paths": multi_code_paths,
-            },
-            "Code mapping saved",
-        )
-    except Exception as e:
-        logger.error("build_code_mapping failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(
+        {
+            "model_name": model_name,
+            "code_column": code_column,
+            "level_columns": cols,
+            "unique_paths": len(mapping),
+            "unique_codes": len(all_codes),
+            "multi_code_paths": multi_code_paths,
+        },
+        "Code mapping saved",
+    )
 
 
 # ─── Evaluation & Diagnostics ───
 
 
 @mcp.tool()
+@mcp_tool_safe
 def evaluate_model(
     model_name: str,
     file_path: str,
@@ -952,73 +912,70 @@ def evaluate_model(
         text_column: Name of text column
         level_columns: Ordered label columns matching model's taxonomy
     """
+    logger.info("tool=evaluate_model model=%s file=%s", model_name, file_path)
+    predictor = _get_predictor(model_name)
+    taxonomy = predictor.taxonomy
+
+    df = load_dataframe(file_path)
+    warnings = validate_columns(df, text_column, level_columns)
+
+    clean_df = df.dropna(subset=[text_column] + level_columns).reset_index(drop=True)
+    texts = clean_df[text_column].tolist()
+    embeddings = encode_texts(texts, taxonomy.embedding_model)
+
+    results = predictor.predict_batch(embeddings, texts=texts)
+
+    # Per-level accuracy
+    level_accuracies = {}
+    for depth, col in enumerate(level_columns):
+        if depth >= taxonomy.num_levels:
+            break
+        true_labels = clean_df[col].tolist()
+        pred_labels = [r.path[depth] if depth < len(r.path) else "" for r in results]
+        correct = sum(1 for t, p in zip(true_labels, pred_labels) if t == p)
+        level_accuracies[taxonomy.get_level(depth).name] = {
+            "accuracy": round(correct / len(true_labels), 4),
+            "correct": correct,
+            "total": len(true_labels),
+        }
+
+    # Routing stats
+    routing_counts = {}
+    for r in results:
+        d = r.routing["decision"]
+        routing_counts[d] = routing_counts.get(d, 0) + 1
+
+    # Build evaluation insights
     try:
-        logger.info("tool=evaluate_model model=%s file=%s", model_name, file_path)
-        predictor = _get_predictor(model_name)
-        taxonomy = predictor.taxonomy
+        model_path = _config.model_path(model_name)
+        with open(model_path / "manifest.json") as f:
+            manifest = json.load(f)
+    except Exception:
+        manifest = None
 
-        df = load_dataframe(file_path)
-        warnings = validate_columns(df, text_column, level_columns)
-
-        clean_df = df.dropna(subset=[text_column] + level_columns).reset_index(drop=True)
-        texts = clean_df[text_column].tolist()
-        embeddings = encode_texts(texts, taxonomy.embedding_model)
-
-        results = predictor.predict_batch(embeddings, texts=texts)
-
-        # Per-level accuracy
-        level_accuracies = {}
-        for depth, col in enumerate(level_columns):
-            if depth >= taxonomy.num_levels:
-                break
-            true_labels = clean_df[col].tolist()
-            pred_labels = [r.path[depth] if depth < len(r.path) else "" for r in results]
-            correct = sum(1 for t, p in zip(true_labels, pred_labels) if t == p)
-            level_accuracies[taxonomy.get_level(depth).name] = {
-                "accuracy": round(correct / len(true_labels), 4),
-                "correct": correct,
-                "total": len(true_labels),
-            }
-
-        # Routing stats
-        routing_counts = {}
-        for r in results:
-            d = r.routing["decision"]
-            routing_counts[d] = routing_counts.get(d, 0) + 1
-
-        # Build evaluation insights
-        try:
-            model_path = _config.model_path(model_name)
-            with open(model_path / "manifest.json") as f:
-                manifest = json.load(f)
-        except Exception:
-            manifest = None
-
-        try:
-            evaluation_insights = build_evaluation_insights(
-                level_accuracies,
-                routing_counts,
-                len(results),
-                manifest,
-            )
-        except Exception:
-            evaluation_insights = None
-
-        return success_response(
-            {
-                "total_items": len(results),
-                "per_level_accuracy": level_accuracies,
-                "routing_distribution": routing_counts,
-                "evaluation_insights": evaluation_insights,
-                "warnings": warnings,
-            }
+    try:
+        evaluation_insights = build_evaluation_insights(
+            level_accuracies,
+            routing_counts,
+            len(results),
+            manifest,
         )
-    except Exception as e:
-        logger.error("evaluate_model failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    except Exception:
+        evaluation_insights = None
+
+    return success_response(
+        {
+            "total_items": len(results),
+            "per_level_accuracy": level_accuracies,
+            "routing_distribution": routing_counts,
+            "evaluation_insights": evaluation_insights,
+            "warnings": warnings,
+        }
+    )
 
 
 @mcp.tool()
+@mcp_tool_safe
 def explain_prediction(
     model_name: str,
     text: str,
@@ -1029,59 +986,56 @@ def explain_prediction(
         model_name: Name of trained model
         text: Text to explain
     """
-    try:
-        logger.info("tool=explain_prediction model=%s", model_name)
-        predictor = _get_predictor(model_name)
-        taxonomy = predictor.taxonomy
+    logger.info("tool=explain_prediction model=%s", model_name)
+    predictor = _get_predictor(model_name)
+    taxonomy = predictor.taxonomy
 
-        embedding = encode_texts([text], taxonomy.embedding_model, show_progress=False)[0]
+    embedding = encode_texts([text], taxonomy.embedding_model, show_progress=False)[0]
 
-        # Use beam search for explanation
-        beam_result = predictor.beam.predict(embedding)
+    # Use beam search for explanation
+    beam_result = predictor.beam.predict(embedding)
 
-        # Novelty details
-        leaf_pred = beam_result.level_predictions[-1]
-        min_conf = min(lp.confidence for lp in beam_result.level_predictions)
-        novelty = predictor.novelty_detector.score(embedding, leaf_pred.predicted, min_conf)
+    # Novelty details
+    leaf_pred = beam_result.level_predictions[-1]
+    min_conf = min(lp.confidence for lp in beam_result.level_predictions)
+    novelty = predictor.novelty_detector.score(embedding, leaf_pred.predicted, min_conf)
 
-        return success_response(
-            {
-                "text": text,
-                "best_path": beam_result.path,
-                "path_score": round(beam_result.path_score, 4),
-                "level_details": [
-                    {
-                        "depth": lp.depth,
-                        "level": lp.name,
-                        "predicted": lp.predicted,
-                        "confidence": round(lp.confidence, 4),
-                        "margin": round(lp.margin, 4),
-                        "top_candidates": lp.top_candidates,
-                    }
-                    for lp in beam_result.level_predictions
-                ],
-                "alternative_paths": [
-                    {
-                        "path": bp.labels,
-                        "score": round(bp.log_score, 4),
-                        "probs": [round(p, 4) for p in bp.probs],
-                    }
-                    for bp in beam_result.alternative_paths
-                ],
-                "novelty": {
-                    "centroid_distance": round(novelty.centroid_distance, 4),
-                    "centroid_z_score": round(novelty.centroid_z_score, 4),
-                    "knn_distance": round(novelty.knn_distance, 4),
-                    "is_novel": novelty.is_novel,
-                },
-            }
-        )
-    except Exception as e:
-        logger.error("explain_prediction failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(
+        {
+            "text": text,
+            "best_path": beam_result.path,
+            "path_score": round(beam_result.path_score, 4),
+            "level_details": [
+                {
+                    "depth": lp.depth,
+                    "level": lp.name,
+                    "predicted": lp.predicted,
+                    "confidence": round(lp.confidence, 4),
+                    "margin": round(lp.margin, 4),
+                    "top_candidates": lp.top_candidates,
+                }
+                for lp in beam_result.level_predictions
+            ],
+            "alternative_paths": [
+                {
+                    "path": bp.labels,
+                    "score": round(bp.log_score, 4),
+                    "probs": [round(p, 4) for p in bp.probs],
+                }
+                for bp in beam_result.alternative_paths
+            ],
+            "novelty": {
+                "centroid_distance": round(novelty.centroid_distance, 4),
+                "centroid_z_score": round(novelty.centroid_z_score, 4),
+                "knn_distance": round(novelty.knn_distance, 4),
+                "is_novel": novelty.is_novel,
+            },
+        }
+    )
 
 
 @mcp.tool()
+@mcp_tool_safe
 def get_confusion_matrix(
     model_name: str,
     level: str,
@@ -1098,80 +1052,74 @@ def get_confusion_matrix(
         text_column: Text column name
         level_columns: Ordered label columns
     """
-    try:
-        logger.info("tool=get_confusion_matrix model=%s level=%s", model_name, level)
-        from sklearn.metrics import classification_report
+    logger.info("tool=get_confusion_matrix model=%s level=%s", model_name, level)
+    from sklearn.metrics import classification_report
 
-        predictor = _get_predictor(model_name)
-        taxonomy = predictor.taxonomy
+    predictor = _get_predictor(model_name)
+    taxonomy = predictor.taxonomy
 
-        target_level = taxonomy.get_level_by_name(level)
-        if target_level is None:
-            return validation_error(f"Level '{level}' not found in model")
+    target_level = taxonomy.get_level_by_name(level)
+    if target_level is None:
+        raise ToolValidationError(f"Level '{level}' not found in model")
 
-        df = load_dataframe(file_path)
-        clean_df = df.dropna(subset=[text_column] + level_columns).reset_index(drop=True)
-        texts = clean_df[text_column].tolist()
-        embeddings = encode_texts(texts, taxonomy.embedding_model)
+    df = load_dataframe(file_path)
+    clean_df = df.dropna(subset=[text_column] + level_columns).reset_index(drop=True)
+    texts = clean_df[text_column].tolist()
+    embeddings = encode_texts(texts, taxonomy.embedding_model)
 
-        results = predictor.predict_batch(embeddings, texts=texts)
+    results = predictor.predict_batch(embeddings, texts=texts)
 
-        depth = target_level.depth
-        true_labels = clean_df[level].tolist()
-        pred_labels = [r.path[depth] if depth < len(r.path) else "" for r in results]
+    depth = target_level.depth
+    true_labels = clean_df[level].tolist()
+    pred_labels = [r.path[depth] if depth < len(r.path) else "" for r in results]
 
-        report = classification_report(true_labels, pred_labels, output_dict=True, zero_division=0)
+    report = classification_report(true_labels, pred_labels, output_dict=True, zero_division=0)
 
-        return success_response(
-            {
-                "level": level,
-                "depth": depth,
-                "classification_report": report,
-            }
-        )
-    except Exception as e:
-        logger.error("get_confusion_matrix failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(
+        {
+            "level": level,
+            "depth": depth,
+            "classification_report": report,
+        }
+    )
 
 
 @mcp.tool()
+@mcp_tool_safe
 def get_threshold_report(model_name: str) -> dict:
     """Current thresholds and routing distribution info.
 
     Args:
         model_name: Name of trained model
     """
-    try:
-        logger.info("tool=get_threshold_report model=%s", model_name)
-        model_path = _config.model_path(model_name)
-        thresholds = load_thresholds(model_path)
+    logger.info("tool=get_threshold_report model=%s", model_name)
+    model_path = _config.model_path(model_name)
+    thresholds = load_thresholds(model_path)
 
-        _, manifest = load_model(model_path)
-        taxonomy = manifest.taxonomy
+    _, manifest = load_model(model_path)
+    taxonomy = manifest.taxonomy
 
-        per_level = {}
-        for depth in range(taxonomy.num_levels):
-            level = taxonomy.get_level(depth)
-            per_level[level.name] = {
-                "depth": depth,
-                "threshold": thresholds.get(depth, 0.75),
-            }
+    per_level = {}
+    for depth in range(taxonomy.num_levels):
+        level = taxonomy.get_level(depth)
+        per_level[level.name] = {
+            "depth": depth,
+            "threshold": thresholds.get(depth, 0.75),
+        }
 
-        return success_response(
-            {
-                "model_name": model_name,
-                "per_level_thresholds": per_level,
-                "margin": thresholds.get("margin", 0.15),
-                "z_score": thresholds.get("z_score", 2.5),
-                "novelty_conf": thresholds.get("novelty_conf", 0.70),
-            }
-        )
-    except Exception as e:
-        logger.error("get_threshold_report failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(
+        {
+            "model_name": model_name,
+            "per_level_thresholds": per_level,
+            "margin": thresholds.get("margin", 0.15),
+            "z_score": thresholds.get("z_score", 2.5),
+            "novelty_conf": thresholds.get("novelty_conf", 0.70),
+        }
+    )
 
 
 @mcp.tool()
+@mcp_tool_safe
 def set_thresholds(
     model_name: str,
     thresholds: dict[str, float],
@@ -1182,52 +1130,49 @@ def set_thresholds(
         model_name: Name of trained model
         thresholds: Dict of threshold overrides. Keys can be level names, depth indices, "margin", "z_score", "novelty_conf", "adaptive_factor" (int, beam widening multiplier, default 2).
     """
-    try:
-        logger.info(
-            "tool=set_thresholds model=%s overrides=%s",
-            model_name,
-            list(thresholds.keys()),
-        )
-        model_path = _config.model_path(model_name)
-        current = load_thresholds(model_path)
+    logger.info(
+        "tool=set_thresholds model=%s overrides=%s",
+        model_name,
+        list(thresholds.keys()),
+    )
+    model_path = _config.model_path(model_name)
+    current = load_thresholds(model_path)
 
-        _, manifest = load_model(model_path)
-        taxonomy = manifest.taxonomy
+    _, manifest = load_model(model_path)
+    taxonomy = manifest.taxonomy
 
-        # Apply overrides
-        for key, value in thresholds.items():
-            # Try as level name
-            level = taxonomy.get_level_by_name(key)
-            if level is not None:
-                current[level.depth] = value
-            else:
-                try:
-                    current[int(key)] = value
-                except ValueError:
-                    current[key] = value
+    # Apply overrides
+    for key, value in thresholds.items():
+        # Try as level name
+        level = taxonomy.get_level_by_name(key)
+        if level is not None:
+            current[level.depth] = value
+        else:
+            try:
+                current[int(key)] = value
+            except ValueError:
+                current[key] = value
 
-        # Save
-        with open(model_path / "thresholds.json", "w") as f:
-            json.dump({str(k): v for k, v in current.items()}, f, indent=2)
+    # Save
+    with open(model_path / "thresholds.json", "w") as f:
+        json.dump({str(k): v for k, v in current.items()}, f, indent=2)
 
-        _predictor_cache.pop(model_name, None)
+    _predictor_cache.pop(model_name, None)
 
-        return success_response(
-            {
-                "model_name": model_name,
-                "thresholds": {str(k): v for k, v in current.items()},
-            },
-            "Thresholds updated",
-        )
-    except Exception as e:
-        logger.error("set_thresholds failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(
+        {
+            "model_name": model_name,
+            "thresholds": {str(k): v for k, v in current.items()},
+        },
+        "Thresholds updated",
+    )
 
 
 # ─── Feedback ───
 
 
 @mcp.tool()
+@mcp_tool_safe
 def submit_feedback(
     model_name: str,
     text: str,
@@ -1242,34 +1187,31 @@ def submit_feedback(
         corrected_labels: Dict of {level_name: correct_label}
         prediction_id: Optional prediction ID to link feedback to
     """
-    try:
-        logger.info("tool=submit_feedback model=%s prediction_id=%s", model_name, prediction_id)
-        feedback_dir = _config.feedback_dir / model_name
-        feedback_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("tool=submit_feedback model=%s prediction_id=%s", model_name, prediction_id)
+    feedback_dir = _config.feedback_dir / model_name
+    feedback_dir.mkdir(parents=True, exist_ok=True)
 
-        entry = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "model_name": model_name,
-            "text": text,
-            "corrected_labels": corrected_labels,
-            "prediction_id": prediction_id,
-        }
+    entry = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "model_name": model_name,
+        "text": text,
+        "corrected_labels": corrected_labels,
+        "prediction_id": prediction_id,
+    }
 
-        # Append to JSONL file
-        feedback_file = feedback_dir / "feedback.jsonl"
-        with open(feedback_file, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+    # Append to JSONL file
+    feedback_file = feedback_dir / "feedback.jsonl"
+    with open(feedback_file, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
-        return success_response(None, "Feedback recorded")
-    except Exception as e:
-        logger.error("submit_feedback failed: %s", e, exc_info=True)
-        return internal_error(str(e))
+    return success_response(None, "Feedback recorded")
 
 
 # ─── Embedding ───
 
 
 @mcp.tool()
+@mcp_tool_safe
 def list_embedding_models() -> dict:
     """List popular sentence-transformer models for embedding."""
     models = [
