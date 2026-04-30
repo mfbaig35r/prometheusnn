@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -11,8 +10,9 @@ import numpy as np
 @dataclass
 class DataSplit:
     """A split of data for training/validation/calibration."""
-    embeddings: np.ndarray                       # (N, embed_dim)
-    labels_by_depth: dict[int, np.ndarray]       # {0: (N,), 1: (N,), ...}
+
+    embeddings: np.ndarray  # (N, embed_dim)
+    labels_by_depth: dict[int, np.ndarray]  # {0: (N,), 1: (N,), ...}
     texts: list[str] | None = None
 
     def __len__(self) -> int:

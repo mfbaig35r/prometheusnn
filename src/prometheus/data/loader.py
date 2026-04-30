@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from prometheus.core.embedding import encode_texts, get_embedding_dim
-from prometheus.data.taxonomy import TaxonomyInfo, LevelSpec
+from prometheus.core.embedding import encode_texts
 from prometheus.data.splits import DataSplit
+from prometheus.data.taxonomy import TaxonomyInfo
 
 
 def load_dataframe(file_path: str | Path) -> pd.DataFrame:
@@ -41,7 +41,6 @@ def validate_columns(
 
     # Check for missing values
     all_cols = [text_column] + level_columns
-    before = len(df)
     null_counts = df[all_cols].isnull().sum()
     for col, count in null_counts.items():
         if count > 0:
@@ -130,9 +129,7 @@ def prepare_data(
     warnings.extend(check_hierarchy_consistency(clean_df, level_columns))
 
     # Extract taxonomy
-    taxonomy = extract_taxonomy(
-        clean_df, model_name, text_column, level_columns, embedding_model
-    )
+    taxonomy = extract_taxonomy(clean_df, model_name, text_column, level_columns, embedding_model)
 
     # Build parent→valid_children map for hierarchical masking
     if len(level_columns) > 1:
@@ -143,28 +140,20 @@ def prepare_data(
             parent_level = taxonomy.get_level(depth - 1)
             child_level = taxonomy.get_level(depth)
             for parent_cls in parent_level.classes:
-                child_vals = clean_df.loc[
-                    clean_df[parent_col] == parent_cls, child_col
-                ].unique()
-                child_indices = sorted(
-                    child_level.encode(c) for c in child_vals
-                )
+                child_vals = clean_df.loc[clean_df[parent_col] == parent_cls, child_col].unique()
+                child_indices = sorted(child_level.encode(c) for c in child_vals)
                 parent_idx = parent_level.encode(parent_cls)
                 pcm[f"{depth}:{parent_idx}"] = child_indices
         taxonomy.parent_child_map = pcm
 
     # Encode texts
     texts = clean_df[text_column].tolist()
-    embeddings = encode_texts(
-        texts, embedding_model, show_progress=show_progress
-    )
+    embeddings = encode_texts(texts, embedding_model, show_progress=show_progress)
 
     # Encode labels by depth
     labels_by_depth = {}
     for depth, level in enumerate(taxonomy.levels):
-        labels_by_depth[depth] = np.array(
-            [level.encode(val) for val in clean_df[level.name]]
-        )
+        labels_by_depth[depth] = np.array([level.encode(val) for val in clean_df[level.name]])
 
     # Split — handle rare classes that can't be stratified
     indices = np.arange(len(clean_df))
@@ -200,9 +189,7 @@ def prepare_data(
             stratify=root_labels[val_test_idx],
         )
 
-        rare_class_names = [
-            taxonomy.levels[0].decode(int(lbl)) for lbl in rare_labels
-        ]
+        rare_class_names = [taxonomy.levels[0].decode(int(lbl)) for lbl in rare_labels]
         warnings.append(
             f"Rare root classes forced into training set (too few samples to stratify): "
             f"{rare_class_names}"
@@ -259,13 +246,15 @@ def analyze_data(
     level_stats = []
     for col in level_columns:
         counts = clean_df[col].value_counts()
-        level_stats.append({
-            "column": col,
-            "num_classes": len(counts),
-            "class_counts": counts.to_dict(),
-            "min_count": int(counts.min()),
-            "max_count": int(counts.max()),
-        })
+        level_stats.append(
+            {
+                "column": col,
+                "num_classes": len(counts),
+                "class_counts": counts.to_dict(),
+                "min_count": int(counts.min()),
+                "max_count": int(counts.max()),
+            }
+        )
 
     return {
         "total_rows": len(df),

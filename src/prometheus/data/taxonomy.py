@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cached_property
 
 
 @dataclass
 class LevelSpec:
     """Specification for a single taxonomy level."""
-    depth: int                      # 0-indexed (0 = root)
-    name: str                       # User-friendly name from CSV column
-    classes: list[str]              # Unique class labels at this level
-    class_to_idx: dict[str, int]    # Label -> integer mapping
-    parent_dims: list[int]          # [num_classes_L0, ...] for parent context
+
+    depth: int  # 0-indexed (0 = root)
+    name: str  # User-friendly name from CSV column
+    classes: list[str]  # Unique class labels at this level
+    class_to_idx: dict[str, int]  # Label -> integer mapping
+    parent_dims: list[int]  # [num_classes_L0, ...] for parent context
 
     @property
     def num_classes(self) -> int:
@@ -53,6 +54,7 @@ class LevelSpec:
 @dataclass
 class TaxonomyInfo:
     """Complete taxonomy definition for N levels."""
+
     name: str
     levels: list[LevelSpec]
     text_column: str
@@ -101,7 +103,7 @@ class TaxonomyInfo:
     def from_dict(cls, data: dict) -> TaxonomyInfo:
         return cls(
             name=data["name"],
-            levels=[LevelSpec.from_dict(l) for l in data["levels"]],
+            levels=[LevelSpec.from_dict(level) for level in data["levels"]],
             text_column=data["text_column"],
             embedding_model=data["embedding_model"],
             total_samples=data.get("total_samples", 0),
@@ -131,13 +133,15 @@ class TaxonomyInfo:
             sorted_classes = sorted(set(classes))
             class_to_idx = {c: i for i, c in enumerate(sorted_classes)}
             parent_dims = [len(levels[d].classes) for d in range(depth)]
-            levels.append(LevelSpec(
-                depth=depth,
-                name=col_name,
-                classes=sorted_classes,
-                class_to_idx=class_to_idx,
-                parent_dims=parent_dims,
-            ))
+            levels.append(
+                LevelSpec(
+                    depth=depth,
+                    name=col_name,
+                    classes=sorted_classes,
+                    class_to_idx=class_to_idx,
+                    parent_dims=parent_dims,
+                )
+            )
         return cls(
             name=name,
             levels=levels,
