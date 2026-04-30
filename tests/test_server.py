@@ -15,6 +15,7 @@ import pytest
 
 import prometheus.server as server
 from prometheus.core.config import PrometheusConfig
+from prometheus.core.lru import LRUCache
 from prometheus.data.splits import DataSplit
 from prometheus.data.taxonomy import TaxonomyInfo
 from prometheus.inference.novelty import NoveltyDetector
@@ -40,8 +41,8 @@ def tmp_config(tmp_path, monkeypatch):
     cfg = PrometheusConfig(base_dir=tmp_path / ".prometheus")
     cfg.ensure_dirs()
     monkeypatch.setattr(server, "_config", cfg)
-    monkeypatch.setattr(server, "_predictor_cache", {})
-    monkeypatch.setattr(server, "_code_mapping_cache", {})
+    monkeypatch.setattr(server, "_predictor_cache", LRUCache(maxsize=8))
+    monkeypatch.setattr(server, "_code_mapping_cache", LRUCache(maxsize=16))
     monkeypatch.setattr("prometheus.server.encode_texts", _make_random_embeddings)
     monkeypatch.setattr("prometheus.data.loader.encode_texts", _make_random_embeddings)
     return cfg

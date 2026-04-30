@@ -1,24 +1,37 @@
-"""Thread-safe SentenceTransformer singleton and encoding utilities."""
+"""Thread-safe SentenceTransformer LRU cache and encoding utilities."""
 
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING
 
 import numpy as np
 
+from prometheus.core.lru import LRUCache
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
+
+_MODEL_CACHE_SIZE = 4
+
 _lock = threading.Lock()
-_models: dict[str, object] = {}
+_models: LRUCache[str, SentenceTransformer] = LRUCache(maxsize=_MODEL_CACHE_SIZE)
 
 
-def get_embedding_model(model_name: str):
-    """Get or create a SentenceTransformer model (thread-safe singleton)."""
-    if model_name not in _models:
-        with _lock:
-            if model_name not in _models:
-                from sentence_transformers import SentenceTransformer
+def get_embedding_model(model_name: str) -> SentenceTransformer:
+    """Get or load a SentenceTransformer model (LRU cached, thread-safe)."""
+    cached = _models.get(model_name)
+    if cached is not None:
+        return cached
+    with _lock:
+        cached = _models.get(model_name)
+        if cached is not None:
+            return cached
+        from sentence_transformers import SentenceTransformer
 
-                _models[model_name] = SentenceTransformer(model_name)
-    return _models[model_name]
+        model = SentenceTransformer(model_name)
+        _models.put(model_name, model)
+        return model
 
 
 def encode_texts(

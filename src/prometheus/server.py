@@ -14,6 +14,7 @@ from mcp.server.fastmcp import FastMCP
 from prometheus.core.config import PrometheusConfig
 from prometheus.core.embedding import encode_texts
 from prometheus.core.logging import setup_logging
+from prometheus.core.lru import LRUCache
 from prometheus.core.mcp_safety import ToolValidationError, mcp_tool_safe
 from prometheus.core.responses import success_response
 from prometheus.data.loader import (
@@ -63,31 +64,42 @@ _config.ensure_dirs()
 setup_logging(_config.logs_dir)
 logger = logging.getLogger(__name__)
 
-# Cache loaded predictors: {model_name: CascadePredictor}
-_predictor_cache: dict[str, CascadePredictor] = {}
+_PREDICTOR_CACHE_SIZE = 8
+_CODE_MAPPING_CACHE_SIZE = 16
 
-# Cache loaded code mappings: {model_name: dict | None}
-_code_mapping_cache: dict[str, dict | None] = {}
+# Cache loaded predictors with the manifest mtime at load time so we can
+# invalidate stale entries when a model is overwritten on disk.
+_predictor_cache: LRUCache[str, tuple[CascadePredictor, float]] = LRUCache(
+    maxsize=_PREDICTOR_CACHE_SIZE
+)
+
+_code_mapping_cache: LRUCache[str, dict | None] = LRUCache(maxsize=_CODE_MAPPING_CACHE_SIZE)
 
 
 def _get_code_mapping(model_name: str) -> dict | None:
     """Get or load code mapping for a model."""
-    if model_name in _code_mapping_cache:
-        return _code_mapping_cache[model_name]
+    cached = _code_mapping_cache.get(model_name)
+    if cached is not None or model_name in _code_mapping_cache:
+        return cached
     model_path = _config.model_path(model_name)
     mapping = load_code_mapping(model_path)
-    _code_mapping_cache[model_name] = mapping
+    _code_mapping_cache.put(model_name, mapping)
     return mapping
 
 
 def _get_predictor(model_name: str) -> CascadePredictor:
-    """Get or load a CascadePredictor."""
-    if model_name in _predictor_cache:
-        return _predictor_cache[model_name]
-
+    """Get or load a CascadePredictor. Invalidates the cache if manifest.json
+    has been modified since the cached predictor was loaded.
+    """
     model_path = _config.model_path(model_name)
-    if not (model_path / "manifest.json").exists():
+    manifest_path = model_path / "manifest.json"
+    if not manifest_path.exists():
         raise FileNotFoundError(f"Model '{model_name}' not found")
+
+    current_mtime = manifest_path.stat().st_mtime
+    cached = _predictor_cache.get(model_name)
+    if cached is not None and cached[1] >= current_mtime:
+        return cached[0]
 
     model, manifest = load_model(model_path)
     taxonomy = manifest.taxonomy
@@ -110,7 +122,7 @@ def _get_predictor(model_name: str) -> CascadePredictor:
         parent_child_map=taxonomy.parent_child_map,
         adaptive_factor=config.adaptive_factor,
     )
-    _predictor_cache[model_name] = predictor
+    _predictor_cache.put(model_name, (predictor, current_mtime))
     return predictor
 
 
