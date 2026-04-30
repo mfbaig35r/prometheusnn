@@ -20,9 +20,9 @@ from prometheus.intake.profiler import classify_column_kind
 
 
 def test_profiler_classifies_text_column():
-    df = pd.DataFrame({
-        "description": [f"a longer description for item {i} with details" for i in range(50)]
-    })
+    df = pd.DataFrame(
+        {"description": [f"a longer description for item {i} with details" for i in range(50)]}
+    )
     profiles = profile_columns(df)
     assert profiles[0].kind == ColumnKind.TEXT
     assert profiles[0].cardinality == 50
@@ -50,9 +50,9 @@ def test_profiler_classifies_identifier_by_uniqueness():
 
 def test_profiler_long_unique_strings_stay_text():
     """Regression: unique long descriptions should not be classified as identifier."""
-    df = pd.DataFrame({
-        "desc": [f"This is a unique product description for item number {i}" for i in range(100)]
-    })
+    df = pd.DataFrame(
+        {"desc": [f"This is a unique product description for item number {i}" for i in range(100)]}
+    )
     profile = profile_columns(df)[0]
     assert profile.kind == ColumnKind.TEXT
 
@@ -80,30 +80,36 @@ def test_classify_column_kind_id_by_name():
 
 
 def test_detect_hierarchical_relationships():
-    df = pd.DataFrame({
-        "country": ["US", "US", "US", "FR", "FR"],
-        "city": ["NYC", "LA", "SF", "Paris", "Lyon"],
-    })
+    df = pd.DataFrame(
+        {
+            "country": ["US", "US", "US", "FR", "FR"],
+            "city": ["NYC", "LA", "SF", "Paris", "Lyon"],
+        }
+    )
     rels = detect_hierarchical_relationships(df, ["country", "city"])
     assert ("country", "city") in rels
     assert ("city", "country") not in rels
 
 
 def test_detect_no_hierarchy_when_independent():
-    df = pd.DataFrame({
-        "color": ["red", "blue", "red", "blue"] * 5,
-        "size": ["S", "M", "L", "S"] * 5,
-    })
+    df = pd.DataFrame(
+        {
+            "color": ["red", "blue", "red", "blue"] * 5,
+            "size": ["S", "M", "L", "S"] * 5,
+        }
+    )
     rels = detect_hierarchical_relationships(df, ["color", "size"])
     assert rels == []
 
 
 def test_detector_picks_hierarchical():
-    df = pd.DataFrame({
-        "text": [f"product description {i} with extra detail" for i in range(60)],
-        "category": (["A"] * 20 + ["B"] * 20 + ["C"] * 20),
-        "subcategory": ["A1", "A2"] * 10 + ["B1", "B2"] * 10 + ["C1", "C2"] * 10,
-    })
+    df = pd.DataFrame(
+        {
+            "text": [f"product description {i} with extra detail" for i in range(60)],
+            "category": (["A"] * 20 + ["B"] * 20 + ["C"] * 20),
+            "subcategory": ["A1", "A2"] * 10 + ["B1", "B2"] * 10 + ["C1", "C2"] * 10,
+        }
+    )
     profiles = profile_columns(df)
     a = detect_problem_type(df, profiles)
     assert a.problem_type == ProblemType.HIERARCHICAL_CLASSIFICATION
@@ -112,10 +118,12 @@ def test_detector_picks_hierarchical():
 
 
 def test_detector_picks_flat():
-    df = pd.DataFrame({
-        "text": [f"description for item {i} with details" for i in range(60)],
-        "category": ["A", "B", "C"] * 20,
-    })
+    df = pd.DataFrame(
+        {
+            "text": [f"description for item {i} with details" for i in range(60)],
+            "category": ["A", "B", "C"] * 20,
+        }
+    )
     profiles = profile_columns(df)
     a = detect_problem_type(df, profiles)
     assert a.problem_type == ProblemType.FLAT_CLASSIFICATION
@@ -140,12 +148,14 @@ def test_detector_not_a_fit_no_labels():
 
 
 def test_recommender_returns_two_steps_for_deep_hierarchy():
-    df = pd.DataFrame({
-        "text": [f"description for item {i} with details" for i in range(60)],
-        "L1": ["A"] * 30 + ["B"] * 30,
-        "L2": ["A1", "A2"] * 15 + ["B1", "B2"] * 15,
-        "L3": ["A1a", "A1b", "A2a", "A2b"] * 7 + ["B1a", "B1b"] * 8 + ["B2a", "B2b"] * 8,
-    })
+    df = pd.DataFrame(
+        {
+            "text": [f"description for item {i} with details" for i in range(60)],
+            "L1": ["A"] * 30 + ["B"] * 30,
+            "L2": ["A1", "A2"] * 15 + ["B1", "B2"] * 15,
+            "L3": ["A1a", "A1b", "A2a", "A2b"] * 7 + ["B1a", "B1b"] * 8 + ["B2a", "B2b"] * 8,
+        }
+    )
     profiles = profile_columns(df)
     a = detect_problem_type(df, profiles)
     steps = recommend_next_steps("data.csv", a, profiles)
@@ -155,10 +165,12 @@ def test_recommender_returns_two_steps_for_deep_hierarchy():
 
 
 def test_recommender_single_step_for_flat():
-    df = pd.DataFrame({
-        "text": [f"description for item {i} with details" for i in range(60)],
-        "category": ["A", "B", "C"] * 20,
-    })
+    df = pd.DataFrame(
+        {
+            "text": [f"description for item {i} with details" for i in range(60)],
+            "category": ["A", "B", "C"] * 20,
+        }
+    )
     profiles = profile_columns(df)
     a = detect_problem_type(df, profiles)
     steps = recommend_next_steps("data.csv", a, profiles)
@@ -168,10 +180,12 @@ def test_recommender_single_step_for_flat():
 def test_concerns_flag_low_samples_per_class():
     # 30 rows across 20 distinct categories → ~1.5 samples per class, well below threshold
     categories = [f"category_{i}" for i in range(20)] + [f"category_{i}" for i in range(10)]
-    df = pd.DataFrame({
-        "text": [f"item description {i} with details" for i in range(30)],
-        "label": categories,
-    })
+    df = pd.DataFrame(
+        {
+            "text": [f"item description {i} with details" for i in range(30)],
+            "label": categories,
+        }
+    )
     profiles = profile_columns(df)
     a = detect_problem_type(df, profiles)
     concerns = surface_concerns(df, a, profiles)
@@ -186,8 +200,12 @@ def test_estimate_training_time_scales_with_rows():
 
 
 def test_estimate_training_time_mpnet_slower_than_minilm():
-    minilm_low, _ = estimate_training_time(rows=10000, num_levels=2, embedding_model="all-MiniLM-L6-v2")
-    mpnet_low, _ = estimate_training_time(rows=10000, num_levels=2, embedding_model="all-mpnet-base-v2")
+    minilm_low, _ = estimate_training_time(
+        rows=10000, num_levels=2, embedding_model="all-MiniLM-L6-v2"
+    )
+    mpnet_low, _ = estimate_training_time(
+        rows=10000, num_levels=2, embedding_model="all-mpnet-base-v2"
+    )
     assert mpnet_low > minilm_low
 
 

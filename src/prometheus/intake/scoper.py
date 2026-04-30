@@ -7,23 +7,51 @@ import re
 from prometheus.intake.models import ProblemType, ScopeResult
 
 _CLASSIFICATION_KEYWORDS = {
-    "classify", "classification", "categorize", "categorise", "category",
-    "label", "tag", "bucket", "group into", "assign to", "sort into",
-    "type of", "kind of", "which", "map ", "mapping",
-    "industry code", "product code", "tariff code",
+    "classify",
+    "classification",
+    "categorize",
+    "categorise",
+    "category",
+    "label",
+    "tag",
+    "bucket",
+    "group into",
+    "assign to",
+    "sort into",
+    "type of",
+    "kind of",
+    "which",
+    "map ",
+    "mapping",
+    "industry code",
+    "product code",
+    "tariff code",
 }
 
 _HIERARCHICAL_KEYWORDS = {
-    "hierarchy", "hierarchical", "nested", "taxonomy",
-    "subcategory", "sub-category", "subcategories",
-    "nested levels", "levels of categories", "category levels",
-    "tree of categories", "parent category", "child category",
+    "hierarchy",
+    "hierarchical",
+    "nested",
+    "taxonomy",
+    "subcategory",
+    "sub-category",
+    "subcategories",
+    "nested levels",
+    "levels of categories",
+    "category levels",
+    "tree of categories",
+    "parent category",
+    "child category",
 }
 
 _HIERARCHICAL_PATTERN = re.compile(r"\b\d+\s+(?:nested\s+)?(?:levels?\s+of|tiers?\s+of)")
 
 _REGRESSION_KEYWORDS = {
-    "regression", "forecast", "how much", "how many", "what price",
+    "regression",
+    "forecast",
+    "how much",
+    "how many",
+    "what price",
 }
 
 _REGRESSION_PATTERNS = [
@@ -32,19 +60,37 @@ _REGRESSION_PATTERNS = [
 ]
 
 _CLUSTERING_KEYWORDS = {
-    "cluster", "group similar", "find patterns", "segment",
-    "discover", "unsupervised", "without labels",
-    "find natural groups", "find groups", "natural groups",
+    "cluster",
+    "group similar",
+    "find patterns",
+    "segment",
+    "discover",
+    "unsupervised",
+    "without labels",
+    "find natural groups",
+    "find groups",
+    "natural groups",
 }
 
 _EXTRACTION_KEYWORDS = {
-    "extract", "pull out", "find entities", "named entity", "ner",
-    "highlight", "annotate", "parse",
+    "extract",
+    "pull out",
+    "find entities",
+    "named entity",
+    "ner",
+    "highlight",
+    "annotate",
+    "parse",
 }
 
 _NO_LABELS_KEYWORDS = {
-    "no labels", "unlabeled", "unlabelled", "don't have labels",
-    "haven't labeled", "haven't labelled", "no training data",
+    "no labels",
+    "unlabeled",
+    "unlabelled",
+    "don't have labels",
+    "haven't labeled",
+    "haven't labelled",
+    "no training data",
 }
 
 _COUNT_PATTERN = re.compile(r"(\d[\d,]*)\s*(?:categories|classes|labels|buckets|types|groups)")
@@ -79,7 +125,9 @@ def scope_problem_from_text(
             ),
         )
 
-    if _matches_any(text, _REGRESSION_KEYWORDS) or any(p.search(text) for p in _REGRESSION_PATTERNS):
+    if _matches_any(text, _REGRESSION_KEYWORDS) or any(
+        p.search(text) for p in _REGRESSION_PATTERNS
+    ):
         return ScopeResult(
             fits_prometheus=False,
             reasoning=(
@@ -94,7 +142,9 @@ def scope_problem_from_text(
             next_step="If you can re-frame as 'low/medium/high' buckets, Prometheus would fit.",
         )
 
-    if _matches_any(text, _CLUSTERING_KEYWORDS) and not _matches_any(text, _CLASSIFICATION_KEYWORDS):
+    if _matches_any(text, _CLUSTERING_KEYWORDS) and not _matches_any(
+        text, _CLASSIFICATION_KEYWORDS
+    ):
         return ScopeResult(
             fits_prometheus=False,
             reasoning=(
@@ -120,9 +170,7 @@ def scope_problem_from_text(
                 "entities or fields from text), not classification. Prometheus "
                 "assigns a whole document to a category — it doesn't extract spans."
             ),
-            redirect_suggestion=(
-                "Look at spaCy's NER or fine-tuned LLMs with structured output."
-            ),
+            redirect_suggestion=("Look at spaCy's NER or fine-tuned LLMs with structured output."),
             next_step="",
         )
 
@@ -169,8 +217,7 @@ def _build_fit_result(text: str, hint: str) -> ScopeResult:
             else "CSV with one text column and one label column"
         ),
         "example_row": (
-            "text='Live purebred breeding horses', "
-            "Chapter='Live Animals', Heading='Live horses'"
+            "text='Live purebred breeding horses', Chapter='Live Animals', Heading='Live horses'"
             if is_hierarchical
             else "text='My order is late', category='shipping_issue'"
         ),

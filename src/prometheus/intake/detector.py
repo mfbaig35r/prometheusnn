@@ -140,9 +140,7 @@ def _order_by_hierarchy(
 
 def _categorical_could_be_text(cat_cols: list[ColumnProfile]) -> bool:
     """A categorical column with high cardinality and long values may actually be text."""
-    return any(
-        c.cardinality > 100 and (c.avg_text_length or 0) > 30 for c in cat_cols
-    )
+    return any(c.cardinality > 100 and (c.avg_text_length or 0) > 30 for c in cat_cols)
 
 
 def _pick_text_column(

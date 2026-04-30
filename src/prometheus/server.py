@@ -339,25 +339,27 @@ def start_here(file_path: str, goal_description: str | None = None) -> dict:
         relevant_profiles = [p for p in profiles if p.name in relevant_names]
         unused_columns = [p.name for p in profiles if p.name not in relevant_names]
 
-        return success_response({
-            "data_summary": {
-                "rows": len(df),
-                "columns": [p.name for p in profiles],
-                "relevant_profiles": [p.to_dict() for p in relevant_profiles],
-                "unused_columns": unused_columns,
-            },
-            "assessment": assessment.to_dict(),
-            "confidence_guide": (
-                "0.9+ = strong signal, recommendation can be trusted; "
-                "0.7-0.9 = good signal, worth confirming with the user; "
-                "below 0.7 = weak signal, ask the user to clarify their goal."
-            ),
-            "concerns": [c.to_dict() for c in concerns],
-            "estimated_training_time_minutes": (
-                {"low": time_low, "high": time_high} if time_low else None
-            ),
-            "next_steps": [s.to_dict() for s in next_steps],
-        })
+        return success_response(
+            {
+                "data_summary": {
+                    "rows": len(df),
+                    "columns": [p.name for p in profiles],
+                    "relevant_profiles": [p.to_dict() for p in relevant_profiles],
+                    "unused_columns": unused_columns,
+                },
+                "assessment": assessment.to_dict(),
+                "confidence_guide": (
+                    "0.9+ = strong signal, recommendation can be trusted; "
+                    "0.7-0.9 = good signal, worth confirming with the user; "
+                    "below 0.7 = weak signal, ask the user to clarify their goal."
+                ),
+                "concerns": [c.to_dict() for c in concerns],
+                "estimated_training_time_minutes": (
+                    {"low": time_low, "high": time_high} if time_low else None
+                ),
+                "next_steps": [s.to_dict() for s in next_steps],
+            }
+        )
     except FileNotFoundError:
         return validation_error(f"File not found: {file_path}", field="file_path")
     except Exception as e:
