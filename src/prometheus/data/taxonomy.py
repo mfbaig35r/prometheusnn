@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from functools import cached_property
 
 
 @dataclass
@@ -19,7 +20,7 @@ class LevelSpec:
     def num_classes(self) -> int:
         return len(self.classes)
 
-    @property
+    @cached_property
     def idx_to_class(self) -> dict[int, str]:
         return {v: k for k, v in self.class_to_idx.items()}
 
