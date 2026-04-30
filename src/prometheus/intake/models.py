@@ -1,9 +1,10 @@
-"""Dataclasses for intake assessment results."""
+"""Pydantic models for intake assessment results."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from enum import StrEnum
+
+from pydantic import BaseModel, Field, field_serializer
 
 
 class ColumnKind(StrEnum):
@@ -26,8 +27,7 @@ class ProblemType(StrEnum):
     NOT_A_FIT = "not_a_fit"
 
 
-@dataclass
-class ColumnProfile:
+class ColumnProfile(BaseModel):
     """Profile of a single column."""
 
     name: str
@@ -39,36 +39,20 @@ class ColumnProfile:
     avg_text_length: float | None = None
     median_text_length: float | None = None
 
-    def to_dict(self) -> dict:
-        return {
-            "name": self.name,
-            "kind": self.kind.value,
-            "dtype": self.dtype,
-            "cardinality": self.cardinality,
-            "null_rate": round(self.null_rate, 4),
-            "sample_values": self.sample_values,
-            "avg_text_length": self.avg_text_length,
-            "median_text_length": self.median_text_length,
-        }
+    @field_serializer("null_rate")
+    def _round_null_rate(self, v: float) -> float:
+        return round(v, 4)
 
 
-@dataclass
-class Concern:
+class Concern(BaseModel):
     """A flagged issue the user should know about before training."""
 
-    severity: str  # "info" | "warning" | "critical"
+    severity: str
     message: str
     column: str | None = None
 
-    def to_dict(self) -> dict:
-        d = {"severity": self.severity, "message": self.message}
-        if self.column:
-            d["column"] = self.column
-        return d
 
-
-@dataclass
-class NextStep:
+class NextStep(BaseModel):
     """A recommended next tool call with pre-filled args."""
 
     label: str
@@ -76,62 +60,33 @@ class NextStep:
     args: dict
     rationale: str
 
-    def to_dict(self) -> dict:
-        return {
-            "label": self.label,
-            "tool": self.tool,
-            "args": self.args,
-            "rationale": self.rationale,
-        }
 
-
-@dataclass
-class ProblemAssessment:
+class ProblemAssessment(BaseModel):
     """Result of analyzing a dataset for classifier suitability."""
 
     problem_type: ProblemType
     confidence: float
     reasoning: str
     suggested_text_column: str | None = None
-    suggested_level_columns: list[str] = field(default_factory=list)
-    detected_hierarchies: list[tuple[str, str]] = field(default_factory=list)
+    suggested_level_columns: list[str] = Field(default_factory=list)
+    detected_hierarchies: list[tuple[str, str]] = Field(default_factory=list)
 
-    def to_dict(self) -> dict:
-        return {
-            "problem_type": self.problem_type.value,
-            "confidence": round(self.confidence, 3),
-            "reasoning": self.reasoning,
-            "suggested_text_column": self.suggested_text_column,
-            "suggested_level_columns": self.suggested_level_columns,
-            "detected_hierarchies": [
-                {"parent": p, "child": c} for p, c in self.detected_hierarchies
-            ],
-        }
+    @field_serializer("confidence")
+    def _round_confidence(self, v: float) -> float:
+        return round(v, 3)
+
+    @field_serializer("detected_hierarchies")
+    def _reshape_hierarchies(self, v: list[tuple[str, str]]) -> list[dict]:
+        return [{"parent": p, "child": c} for p, c in v]
 
 
-@dataclass
-class ScopeResult:
+class ScopeResult(BaseModel):
     """Result of `scope_problem` for users without data yet."""
 
     fits_prometheus: bool
     reasoning: str
     detected_problem_type: ProblemType | None = None
     what_youll_need: dict | None = None
-    watch_out_for: list[str] = field(default_factory=list)
+    watch_out_for: list[str] = Field(default_factory=list)
     next_step: str = ""
     redirect_suggestion: str | None = None
-
-    def to_dict(self) -> dict:
-        d = {
-            "fits_prometheus": self.fits_prometheus,
-            "reasoning": self.reasoning,
-            "watch_out_for": self.watch_out_for,
-            "next_step": self.next_step,
-        }
-        if self.detected_problem_type:
-            d["detected_problem_type"] = self.detected_problem_type.value
-        if self.what_youll_need:
-            d["what_youll_need"] = self.what_youll_need
-        if self.redirect_suggestion:
-            d["redirect_suggestion"] = self.redirect_suggestion
-        return d

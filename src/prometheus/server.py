@@ -158,20 +158,22 @@ def start_here(file_path: str, goal_description: str | None = None) -> dict:
                 "data_summary": {
                     "rows": len(df),
                     "columns": [p.name for p in profiles],
-                    "relevant_profiles": [p.to_dict() for p in relevant_profiles],
+                    "relevant_profiles": [
+                        p.model_dump(exclude_none=True) for p in relevant_profiles
+                    ],
                     "unused_columns": unused_columns,
                 },
-                "assessment": assessment.to_dict(),
+                "assessment": assessment.model_dump(exclude_none=True),
                 "confidence_guide": (
                     "0.9+ = strong signal, recommendation can be trusted; "
                     "0.7-0.9 = good signal, worth confirming with the user; "
                     "below 0.7 = weak signal, ask the user to clarify their goal."
                 ),
-                "concerns": [c.to_dict() for c in concerns],
+                "concerns": [c.model_dump(exclude_none=True) for c in concerns],
                 "estimated_training_time_minutes": (
                     {"low": time_low, "high": time_high} if time_low else None
                 ),
-                "next_steps": [s.to_dict() for s in next_steps],
+                "next_steps": [s.model_dump(exclude_none=True) for s in next_steps],
             }
         )
     except FileNotFoundError:
@@ -198,7 +200,7 @@ def scope_problem(goal_description: str, data_hint: str | None = None) -> dict:
     try:
         logger.info("tool=scope_problem goal=%s", goal_description[:80])
         result = scope_problem_from_text(goal_description, data_hint)
-        return success_response(result.to_dict())
+        return success_response(result)
     except Exception as e:
         logger.error("scope_problem failed: %s", e, exc_info=True)
         return internal_error(str(e))
