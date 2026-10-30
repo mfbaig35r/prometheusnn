@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-10-30
+
+### Security
+- **Novelty data is loaded without pickle.** `novelty_centroids.npz` was loaded
+  with `allow_pickle=True`, so a crafted model directory could run code in the
+  server when any tool loaded that model. In 0.2.0 and earlier this was
+  reachable through the `model_name` path traversal fixed in 0.2.1; in 0.2.1 it
+  still applied to a malicious model placed in the models directory. Both
+  novelty files now load with `allow_pickle=False`. Models saved by
+  PrometheusNN contain only numeric and string arrays and load unchanged; a
+  file holding pickled objects is refused with an error asking for a retrain.
+
 ## [0.2.1] - 2026-10-30
 
 ### Security
