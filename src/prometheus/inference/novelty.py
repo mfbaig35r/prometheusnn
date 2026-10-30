@@ -116,17 +116,26 @@ class NoveltyDetector:
 
     def load(self, path: Path):
         path = Path(path)
-        data = np.load(path / "novelty_centroids.npz", allow_pickle=True)
-        class_names = data["class_names"]
-        mean_dists = data["mean_dists"]
-        std_dists = data["std_dists"]
-        p95_dists = data["p95_dists"]
-        counts = data["counts"]
+        # Never unpickle: a model directory is data, and a crafted .npz with object arrays would
+        # run code on load. save() writes only numeric and string arrays, which need no pickle.
+        data = np.load(path / "novelty_centroids.npz", allow_pickle=False)
+        try:
+            class_names = data["class_names"]
+            mean_dists = data["mean_dists"]
+            std_dists = data["std_dists"]
+            p95_dists = data["p95_dists"]
+            counts = data["counts"]
+            centroids = [data[f"centroid_{i}"] for i in range(len(class_names))]
+        except ValueError as exc:
+            raise ValueError(
+                f"{path / 'novelty_centroids.npz'} contains pickled objects; refusing to load it. "
+                "Retrain the model to regenerate it."
+            ) from exc
 
         self.centroids = {}
         for i, name in enumerate(class_names):
             self.centroids[str(name)] = ClassCentroid(
-                centroid=data[f"centroid_{i}"],
+                centroid=centroids[i],
                 mean_dist=float(mean_dists[i]),
                 std_dist=max(float(std_dists[i]), 0.1),
                 p95_dist=float(p95_dists[i]),
@@ -135,7 +144,7 @@ class NoveltyDetector:
 
         emb_path = path / "novelty_embeddings.npy"
         if emb_path.exists():
-            self.training_embeddings = np.load(emb_path)
+            self.training_embeddings = np.load(emb_path, allow_pickle=False)
 
     def get_centroids_data(self) -> dict:
         """Return data dict suitable for np.savez."""
