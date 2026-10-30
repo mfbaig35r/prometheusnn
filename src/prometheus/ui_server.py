@@ -236,7 +236,7 @@ async def _handle_message(ws, msg: dict[str, Any]) -> None:
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-    app: FastAPI | None = FastAPI(title="prometheusnn-ui", version="0.2.0")
+    app: FastAPI | None = FastAPI(title="prometheusnn-ui", version="0.2.1")
 
     @app.get("/health")
     def _health() -> dict:

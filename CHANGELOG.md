@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-30
+
+### Security
+- **Model-name path traversal.** `delete_model`, `describe_model`,
+  `submit_feedback` and every other tool that takes a `model_name` now accept
+  only a single path segment (`[A-Za-z0-9._-]`, no `..`), and every resolved
+  path must stay under its base directory. In 0.2.0, `delete_model("..")`
+  deleted all of `PROMETHEUS_HOME`, an absolute name could delete any
+  directory the process could write, and `submit_feedback` could append to a
+  file outside the feedback directory. Upgrade if the MCP server or the UI
+  server is reachable by anything you do not fully trust.
+- **Unauthenticated UI WebSocket.** `prometheusnn-ui` now requires a token
+  (`?token=` on the WebSocket URL; set with `--token` or
+  `PROMETHEUS_UI_TOKEN`, otherwise generated and printed at startup) and
+  rejects browser handshakes from origins outside an allowlist (the hosted
+  demo and `localhost:3000` by default; add more with `--allowed-origin`).
+  In 0.2.0 any web page open in the same browser could drive every tool.
+- `delete_model` and `export_model` are withheld from the UI unless the
+  server is started with `--allow-destructive`.
+
+### Changed
+- `delete_model` refuses a directory that has no `manifest.json`.
+- `export_model` writes only under the exports directory
+  (`PROMETHEUS_EXPORT_DIR`, default `<PROMETHEUS_HOME>/exports`). A relative
+  `output_path` is placed there; an absolute path outside it is refused.
+  **Breaking** for callers that exported to arbitrary absolute paths.
+
 ## [0.2.0] - 2026-04-30
 
 ### Added
