@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-from pathlib import Path
 
 from prometheus import server
 from prometheus.core.mcp_safety import ToolValidationError, mcp_tool_safe
@@ -86,6 +85,9 @@ def delete_model(model_name: str) -> dict:
     model_path = server._config.model_path(model_name)
     if not model_path.exists():
         raise ToolValidationError(f"Model '{model_name}' not found")
+    # Only ever delete a directory that is a saved model.
+    if not (model_path / "manifest.json").is_file():
+        raise ToolValidationError(f"'{model_name}' is not a saved model (no manifest.json)")
 
     delete_model_from_disk(model_path)
     server._predictor_cache.pop(model_name, None)
@@ -99,21 +101,24 @@ def export_model(
     model_name: str,
     output_path: str,
 ) -> dict:
-    """Copy model directory to a new location.
+    """Copy model directory into the export directory.
 
     Args:
         model_name: Name of the model to export
-        output_path: Destination directory
+        output_path: Destination directory, relative to the export directory
+            (PROMETHEUS_HOME/exports by default, or PROMETHEUS_EXPORT_DIR). An absolute path
+            must point inside it.
     """
     logger.info("tool=export_model model=%s dest=%s", model_name, output_path)
     model_path = server._config.model_path(model_name)
     if not model_path.exists():
         raise ToolValidationError(f"Model '{model_name}' not found")
 
-    dest = Path(output_path)
+    dest = server._config.export_path(output_path)
     if dest.exists():
         raise ToolValidationError(f"Destination already exists: {output_path}")
 
+    dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(model_path, dest)
     return success_response({"exported_to": str(dest)})
 

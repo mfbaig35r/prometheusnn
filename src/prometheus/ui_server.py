@@ -6,6 +6,14 @@ https://prometheusnn.cognitionkernel.agency — toggle to "connected mode"
 and point it at this server (default: ws://localhost:8000/ws/prometheus)
 to drive the same UI against your own data, on your own hardware.
 
+Security. Browsers let any web page open a WebSocket to localhost, so the server:
+
+- requires a per-launch token, passed as ``?token=...`` in the URL (printed at startup, or set
+  with ``--token`` / ``PROMETHEUS_UI_TOKEN``); paste the printed URL into connected mode;
+- accepts browser connections only from allowed origins (the companion site and local dev by
+  default; ``--allowed-origin`` to change);
+- does not offer ``delete_model`` or ``export_model`` unless started with ``--allow-destructive``.
+
 Protocol — JSON over WebSocket. Atomic request/response per tool call.
 
 Client → Server:
@@ -25,9 +33,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
 import inspect
 import json
 import logging
+import os
+import secrets
 from collections.abc import Callable
 from typing import Any
 
@@ -47,6 +58,58 @@ def _build_tool_registry() -> dict[str, Callable[..., dict]]:
     if tool_manager is None:
         raise RuntimeError("Could not access FastMCP tool registry — incompatible mcp version?")
     return {name: tool.fn for name, tool in tool_manager._tools.items()}
+
+
+# ─── Connection security ─────────────────────────────────────────────────────
+
+DEFAULT_ALLOWED_ORIGINS = (
+    "https://prometheusnn.cognitionkernel.agency",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+# Tools that delete or write outside the model store; off over the UI unless --allow-destructive.
+DESTRUCTIVE_TOOLS = frozenset({"delete_model", "export_model"})
+
+_SECURITY: dict[str, Any] = {
+    "token": None,
+    "allowed_origins": frozenset(DEFAULT_ALLOWED_ORIGINS),
+    "allow_destructive": False,
+}
+
+
+def configure(
+    *,
+    token: str | None,
+    allowed_origins: tuple[str, ...] | list[str] = DEFAULT_ALLOWED_ORIGINS,
+    allow_destructive: bool = False,
+) -> None:
+    """Set connection security. main() calls this; tests call it directly."""
+    _SECURITY["token"] = token
+    _SECURITY["allowed_origins"] = frozenset(o.rstrip("/") for o in allowed_origins)
+    _SECURITY["allow_destructive"] = allow_destructive
+
+
+def check_handshake(origin: str | None, token: str | None) -> str | None:
+    """None if the connection may proceed, otherwise the reason it is refused.
+
+    Browsers always send Origin on a WebSocket handshake, so a present Origin must be allowed;
+    a missing Origin means a non-browser client, which still needs the token.
+    """
+    expected = _SECURITY["token"]
+    if not expected:
+        return "server has no token configured"
+    if origin is not None and origin.rstrip("/") not in _SECURITY["allowed_origins"]:
+        return f"origin not allowed: {origin}"
+    if not token or not hmac.compare_digest(token, expected):
+        return "missing or invalid token"
+    return None
+
+
+def _ui_tools() -> dict[str, Callable[..., dict]]:
+    tools = _get_tools()
+    if _SECURITY["allow_destructive"]:
+        return tools
+    return {n: f for n, f in tools.items() if n not in DESTRUCTIVE_TOOLS}
 
 
 _TOOLS_CACHE: dict[str, Callable[..., dict]] | None = None
@@ -90,7 +153,7 @@ def _serialize_tool_metadata(tool_fn: Callable[..., dict]) -> dict[str, Any]:
 
 async def _handle_message(ws, msg: dict[str, Any]) -> None:
     msg_type = msg.get("type")
-    tools = _get_tools()
+    tools = _ui_tools()
 
     if msg_type == "ping":
         await ws.send_json({"type": "pong"})
@@ -111,12 +174,22 @@ async def _handle_message(ws, msg: dict[str, Any]) -> None:
         args = msg.get("args", {}) or {}
 
         if tool_name not in tools:
+            error = (
+                f"{tool_name} is not available over the UI server (start it with --allow-destructive)"
+                if tool_name in DESTRUCTIVE_TOOLS
+                else f"unknown tool: {tool_name}"
+            )
+            await ws.send_json(
+                {"type": "tool_error", "id": call_id, "tool": tool_name, "error": error}
+            )
+            return
+        if not isinstance(args, dict):
             await ws.send_json(
                 {
                     "type": "tool_error",
                     "id": call_id,
                     "tool": tool_name,
-                    "error": f"unknown tool: {tool_name}",
+                    "error": "args must be an object",
                 }
             )
             return
@@ -171,6 +244,13 @@ try:
 
     @app.websocket("/ws/prometheus")
     async def _ws_endpoint(websocket: WebSocket) -> None:
+        refused = check_handshake(
+            websocket.headers.get("origin"), websocket.query_params.get("token")
+        )
+        if refused is not None:
+            logger.warning("refused WebSocket connection: %s", refused)
+            await websocket.close(code=1008)  # before accept(): the handshake fails
+            return
         await websocket.accept()
         peer = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
         logger.info("client connected: %s", peer)
@@ -191,12 +271,21 @@ except ImportError:
 
 
 def create_app():
-    """Factory used by uvicorn --factory. Returns the module-level app."""
+    """Factory used by uvicorn --factory. Returns the module-level app.
+
+    Outside main() (e.g. ``uvicorn --factory``), the token comes from PROMETHEUS_UI_TOKEN or is
+    generated and printed, so the server never runs without one.
+    """
     if app is None:
         raise SystemExit(
             "prometheusnn-ui requires the [ui] extras. Install with:\n"
             "    pip install prometheusnn[ui]"
         )
+    if not _SECURITY["token"]:
+        token = os.environ.get("PROMETHEUS_UI_TOKEN") or secrets.token_urlsafe(24)
+        configure(token=token)
+        if "PROMETHEUS_UI_TOKEN" not in os.environ:
+            print(f"\n  prometheusnn-ui token: {token}  (append ?token=... to the URL)\n")
     return app
 
 
@@ -216,6 +305,23 @@ def main() -> None:
         default="info",
         choices=["debug", "info", "warning", "error"],
     )
+    parser.add_argument(
+        "--token",
+        default=os.environ.get("PROMETHEUS_UI_TOKEN"),
+        help="Connection token (default: PROMETHEUS_UI_TOKEN, or a new random one per launch)",
+    )
+    parser.add_argument(
+        "--allowed-origin",
+        action="append",
+        dest="allowed_origins",
+        help="Browser origin allowed to connect; repeatable (default: the companion site and "
+        "localhost:3000)",
+    )
+    parser.add_argument(
+        "--allow-destructive",
+        action="store_true",
+        help="Also offer delete_model and export_model over the UI",
+    )
     args = parser.parse_args()
 
     try:
@@ -227,12 +333,21 @@ def main() -> None:
         ) from e
 
     logging.basicConfig(level=args.log_level.upper())
+    token = args.token or secrets.token_urlsafe(24)
+    configure(
+        token=token,
+        allowed_origins=args.allowed_origins or DEFAULT_ALLOWED_ORIGINS,
+        allow_destructive=args.allow_destructive,
+    )
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning("binding to %s exposes the server beyond this machine", args.host)
     # Warm the tool registry so the count is logged before serving
     tools = _get_tools()
     logger.info("Registered %d tools", len(tools))
     print(
         f"\n  prometheusnn-ui listening on ws://{args.host}:{args.port}/ws/prometheus\n"
-        f"  Open https://prometheusnn.cognitionkernel.agency and toggle 'Connected mode'\n"
+        f"  Open https://prometheusnn.cognitionkernel.agency, toggle 'Connected mode', and use:\n"
+        f"    ws://{args.host}:{args.port}/ws/prometheus?token={token}\n"
     )
     uvicorn.run(
         create_app(),
