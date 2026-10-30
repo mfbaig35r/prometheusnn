@@ -267,11 +267,92 @@ class TestDeleteModel:
 
 
 class TestExportModel:
-    def test_export(self, trained_model, tmp_path):
-        dest = str(tmp_path / "exported_model")
-        result = server.export_model(trained_model, dest)
+    def test_export(self, trained_model, tmp_config, monkeypatch):
+        monkeypatch.delenv("PROMETHEUS_EXPORT_DIR", raising=False)
+        result = server.export_model(trained_model, "exported_model")
         assert result["status"] == "success"
-        assert Path(dest).exists()
+        assert (tmp_config.exports_dir / "exported_model" / "manifest.json").exists()
+
+    def test_export_outside_export_dir_is_refused(self, trained_model, tmp_path, monkeypatch):
+        monkeypatch.delenv("PROMETHEUS_EXPORT_DIR", raising=False)
+        for dest in (str(tmp_path / "elsewhere"), "../../escape", "/tmp/prometheus-escape"):
+            result = server.export_model(trained_model, dest)
+            assert result["status"] == "validation_error", dest
+        assert not (tmp_path / "elsewhere").exists()
+
+    def test_export_dir_override(self, trained_model, tmp_path, monkeypatch):
+        target = tmp_path / "my-exports"
+        monkeypatch.setenv("PROMETHEUS_EXPORT_DIR", str(target))
+        result = server.export_model(trained_model, str(target / "copy"))
+        assert result["status"] == "success"
+        assert (target / "copy" / "manifest.json").exists()
+
+
+# ─── Model-name path traversal (security) ───
+
+BAD_NAMES = [
+    # Never list a real system path here: against vulnerable code these names reach rmtree.
+    "../escape",
+    "../../nonexistent-parent",
+    "/nonexistent-prometheus-test-path",
+    "/tmp/nonexistent-prometheus-test-dir",
+    "a/b",
+    "..",
+    ".hidden",
+    "",
+    "x" * 200,
+    "name\\with\\backslash",
+    "name\x00null",
+]
+
+
+class TestModelNameTraversal:
+    @pytest.mark.parametrize("name", BAD_NAMES)
+    def test_delete_refuses_bad_names(self, name, tmp_path):
+        victim = tmp_path / "victim"
+        victim.mkdir()
+        (victim / "keep.txt").write_text("keep")
+        result = server.delete_model(name)
+        assert result["status"] == "validation_error"
+        assert (victim / "keep.txt").exists()
+
+    def test_delete_absolute_path_to_real_dir_is_refused(self, tmp_path):
+        victim = tmp_path / "important"
+        victim.mkdir()
+        (victim / "data.txt").write_text("precious")
+        result = server.delete_model(str(victim))
+        assert result["status"] == "validation_error"
+        assert (victim / "data.txt").read_text() == "precious"
+
+    def test_delete_refuses_a_directory_without_manifest(self, tmp_config):
+        stray = tmp_config.models_dir / "not_a_model"
+        stray.mkdir()
+        (stray / "file.txt").write_text("x")
+        result = server.delete_model("not_a_model")
+        assert result["status"] == "validation_error"
+        assert stray.exists()
+
+    @pytest.mark.parametrize("name", ["../outside", "/tmp/fb-outside"])
+    def test_feedback_cannot_write_outside_feedback_dir(self, name, tmp_config, tmp_path):
+        result = server.submit_feedback(name, "some text", {"level_1": "x"})
+        assert result["status"] == "validation_error"
+        assert not (tmp_config.feedback_dir.parent / "outside").exists()
+
+    @pytest.mark.parametrize("tool", ["describe_model", "predict", "evaluate_model"])
+    def test_other_tools_validate_names(self, tool):
+        fn = getattr(server, tool)
+        args = {
+            "describe_model": ("../x",),
+            "predict": ("../x", "text"),
+            "evaluate_model": ("../x",),
+        }[tool]
+        result = fn(*args)
+        assert result["status"] in ("validation_error", "error"), result
+
+    @pytest.mark.parametrize("name", ["model-1", "my_model.v2", "A1", "x" * 128])
+    def test_good_names_resolve_inside_models_dir(self, name, tmp_config):
+        path = tmp_config.model_path(name)
+        assert path.parent == tmp_config.models_dir.resolve()
 
 
 # ─── Code Mapping ───

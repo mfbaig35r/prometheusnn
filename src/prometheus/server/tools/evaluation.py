@@ -242,7 +242,7 @@ def submit_feedback(
         prediction_id: Optional prediction ID to link feedback to
     """
     logger.info("tool=submit_feedback model=%s prediction_id=%s", model_name, prediction_id)
-    feedback_dir = server._config.feedback_dir / model_name
+    feedback_dir = server._config.feedback_path(model_name)
     feedback_dir.mkdir(parents=True, exist_ok=True)
 
     entry = {
