@@ -290,6 +290,9 @@ def explain_prediction(
                 "centroid_distance": round(novelty.centroid_distance, 4),
                 "centroid_z_score": round(novelty.centroid_z_score, 4),
                 "knn_distance": round(novelty.knn_distance, 4),
+                "knn_threshold": (
+                    round(novelty.knn_threshold, 4) if novelty.knn_threshold is not None else None
+                ),
                 "is_novel": novelty.is_novel,
             },
         }

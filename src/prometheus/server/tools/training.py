@@ -15,6 +15,7 @@ from prometheus.insights import build_training_insights
 from prometheus.server import logger, mcp
 from prometheus.storage.model_store import load_model, save_model
 from prometheus.training.noise import ParentNoiseInjector
+from prometheus.training.routing import fit_routing
 from prometheus.training.trainer import TrainingConfig
 from prometheus.training.trainer import train_model as run_training
 
@@ -104,6 +105,11 @@ def train_model(
     novelty = NoveltyDetector()
     novelty.fit(train_data.embeddings, train_data.leaf_labels, leaf.classes)
 
+    log("Fitting routing thresholds on the validation split...")
+    thresholds, routing_report = fit_routing(
+        model, taxonomy, novelty, val_data, target_precision=config.auto_accept_precision
+    )
+
     model_path = server._config.model_path(model_name)
     log(f"Saving model to {model_path}...")
     save_model(
@@ -116,6 +122,7 @@ def train_model(
         training_embeddings=train_data.embeddings,
         confusion_profiles=result.confusion_profiles,
         centroids_data=novelty.get_centroids_data(),
+        thresholds=thresholds,
     )
     novelty.save(model_path)
 
@@ -142,6 +149,7 @@ def train_model(
                 "val": len(val_data),
                 "test": len(test_data),
             },
+            "routing": routing_report,
             "learning_insights": learning_insights,
             "warnings": warnings,
             "progress": progress_log,
@@ -238,6 +246,13 @@ def resume_training(
         confusion_profiles=noise_injector.get_serializable_profiles(),
     )
 
+    # Novelty and routing are fit from the data, so refit them for the new weights and data.
+    novelty = NoveltyDetector()
+    novelty.fit(train_data.embeddings, train_data.leaf_labels, taxonomy.leaf_level.classes)
+    thresholds, routing_report = fit_routing(
+        model, taxonomy, novelty, val_data, target_precision=config.auto_accept_precision
+    )
+
     save_model(
         path=model_path,
         model=model,
@@ -247,6 +262,8 @@ def resume_training(
         embedding_dim=embedding_dim,
         training_embeddings=train_data.embeddings,
         confusion_profiles=result.confusion_profiles,
+        centroids_data=novelty.get_centroids_data(),
+        thresholds=thresholds,
     )
 
     server._predictor_cache.pop(model_name, None)
@@ -256,6 +273,7 @@ def resume_training(
             "model_name": model_name,
             "additional_epochs": additional_epochs,
             "metrics": result.summary(),
+            "routing": routing_report,
             "warnings": warnings,
         }
     )

@@ -39,6 +39,9 @@ class TrainingConfig(BaseModel):
     train_ratio: float = 0.80
     val_ratio: float = 0.10
     test_ratio: float = 0.10
+    # Routing thresholds are fit on the validation split so that AUTO_ACCEPT reaches this
+    # precision there; a level that cannot reach it is never auto-accepted.
+    auto_accept_precision: float = Field(default=0.95, ge=0.5, le=1.0)
 
 
 @dataclass

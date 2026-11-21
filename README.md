@@ -60,7 +60,7 @@ From there, the LLM routes through the existing tool surface (training, evaluati
 
 ## What's actually being built
 
-Under the conversational surface, PrometheusNN trains a cascade of neural network classifiers — one per level of your taxonomy — with parent-noise injection so deeper levels stay robust when upper levels are uncertain. Beam search explores alternative paths when confidence drops. Temperature calibration produces probabilities you can trust for routing. Dual-signal novelty detection catches items that don't belong.
+Under the conversational surface, PrometheusNN trains a cascade of neural network classifiers — one per level of your taxonomy — with parent-noise injection so deeper levels stay robust when upper levels are uncertain. Beam search explores alternative paths when confidence drops. Temperature calibration produces probabilities you can trust for routing, and routing thresholds are fit on validation data so auto-accepted predictions meet a target precision. Novelty detection flags items far from everything the model was trained on.
 
 ```
 Text descriptions + taxonomy labels
@@ -80,8 +80,8 @@ Text descriptions + taxonomy labels
   └──────┬──────┘
          ▼
   ┌─────────────┐
-  │   Router    │  calibrated thresholds → accept / review / reject
-  │  + Novelty  │  centroid z-score + kNN distance
+  │   Router    │  thresholds fit to a target precision → accept / review / reject
+  │  + Novelty  │  kNN distance to the training data
   └─────────────┘
 ```
 

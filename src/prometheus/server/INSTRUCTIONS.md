@@ -45,14 +45,21 @@ Use this when the user has training data and wants to build a new classifier.
    - Use `list_embedding_models` if the user asks what's available.
    - Default `noise_rate=0.15` is well-tested. Only increase for very noisy taxonomies.
    - Report per-level val accuracy from the result. If any level is below 0.60, warn the user.
+   - Report the `routing` section: training fits each level's threshold on the validation split
+     so AUTO_ACCEPT reaches `auto_accept_precision` (default 0.95). A level marked
+     `"reachable": false` is never auto-accepted; those items go to HUMAN_REVIEW with the
+     confident levels above it. On large taxonomies this often happens at the leaf. Say so
+     plainly: it means leaf predictions are not reliable enough to skip review.
 
 4. **Evaluate** — call `evaluate_model` on held-out data (if available separately).
    - Compare per-level accuracy to training metrics to check for overfitting.
    - Check `routing_distribution` — if >50% are HUMAN_REVIEW, thresholds may be too tight.
 
 5. **Tune thresholds** — if routing distribution is unbalanced:
-   - Too many HUMAN_REVIEW → lower thresholds with `set_thresholds`
-   - Too many AUTO_ACCEPT on wrong predictions → raise thresholds
+   - Too many HUMAN_REVIEW → lower thresholds with `set_thresholds`, or retrain with a lower
+     `auto_accept_precision`. Either way, tell the user auto-accepted items will be wrong more often.
+   - Too many AUTO_ACCEPT on wrong predictions → raise thresholds, or retrain with a higher
+     `auto_accept_precision`
    - Use `get_threshold_report` to see current values before changing.
 
 ## Workflow 2: Production Prediction
@@ -73,8 +80,9 @@ Use this when the user wants to classify new items with a trained model.
    - **AUTO_ACCEPT**: All levels confident above thresholds. Present the full path.
    - **HUMAN_REVIEW**: Some levels uncertain. Show the `confident_path` (levels the model is sure about)
      and highlight which level triggered review and why (`review_reason`).
-   - **OUT_OF_TAXONOMY**: Item doesn't match known classes. The novelty z-score indicates how far
-     out-of-distribution it is. This suggests a taxonomy gap — the item may need a new category.
+   - **OUT_OF_TAXONOMY**: The item is far from everything the model was trained on: its kNN
+     distance to the training data exceeds `knn_threshold`. This suggests a taxonomy gap, or input
+     that is not the kind of thing the taxonomy covers.
 
 4. **Partial classification** — use `classify_with_context` when upper levels are already known
    (e.g., user knows the Category but wants SubCategory/Type predicted). This locks in known
@@ -105,8 +113,9 @@ Use this when a model exists but accuracy needs to improve.
 
 **If routing is too aggressive (too many HUMAN_REVIEW)**:
 - Call `get_threshold_report` to see current thresholds.
-- Lower thresholds with `set_thresholds` (e.g., reduce leaf threshold from 0.75 to 0.65).
-- This trades off precision for throughput — more items auto-accepted but slightly less reliable.
+- Lower thresholds with `set_thresholds` (e.g., the leaf threshold).
+- This trades precision for throughput: the fitted thresholds were chosen to hit the target
+  precision on validation data, so lowering them means more auto-accepted items are wrong.
 
 **If routing misses errors (AUTO_ACCEPT on wrong predictions)**:
 - Raise thresholds or increase the margin threshold.
@@ -175,10 +184,14 @@ Use this when deciding between models (e.g., different embedding models or hyper
 - `list_embedding_models` — available sentence-transformer models
 
 ## Notes
-- Thresholds are auto-generated as linear decay from 0.90 (root) to 0.75 (leaf).
-  For N levels: threshold[i] = 0.90 - i * 0.15 / (N - 1). Override with `set_thresholds`.
+- Thresholds start from a linear decay, 0.90 (root) to 0.75 (leaf), and training raises each
+  level's threshold until AUTO_ACCEPT reaches `auto_accept_precision` on the validation split
+  (never below the default; 1.01 means "never auto-accept"). With fewer than 40 validation items
+  the defaults are kept. Override with `set_thresholds`.
 - All models saved to `~/.prometheus/models/` as JSON manifest + .pt state dicts. No pickle.
 - Calibration (temperature scaling) is applied automatically during training. Higher temperatures
   mean the model was overconfident — this is normal and corrected by calibration.
-- Novelty detection uses dual signals: centroid z-score (class shape) + kNN distance (local density).
-  Both must be triggered to flag OUT_OF_TAXONOMY (conservative, reduces false positives).
+- Novelty: OUT_OF_TAXONOMY when the kNN distance to the training data exceeds `knn_threshold`,
+  the 99th percentile of the training set's own leave-one-out kNN distances (fit at training,
+  or at load time for models saved before 0.2.3). The centroid z-score is still reported as a
+  diagnostic; it decides only for models saved without training embeddings.
