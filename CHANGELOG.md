@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-11-20
+
+### Fixed
+- **OUT_OF_TAXONOMY no longer fires on ordinary in-taxonomy items.** Novelty was
+  judged by the distance to the *predicted leaf's* centroid, in units of that
+  leaf's spread. Leaves with a few near-identical training rows had their spread
+  clamped to 0.1, so an input belonging to a sibling leaf scored as extreme, and
+  the leaf prediction itself was usually the wrong one. On the HTS sample, 29% of
+  held-out tariff items and 35% of plain-English rewrites were routed
+  OUT_OF_TAXONOMY. Novelty now uses the distance to the k-th nearest training
+  embedding, against the 99th percentile of the training set's own leave-one-out
+  kNN distances: 1% of held-out items and 0% of the rewrites are flagged, while
+  40 of 40 non-product sentences still are. The centroid z-score is still
+  reported, and decides only for models saved without training embeddings.
+- **AUTO_ACCEPT is fit to a target precision instead of fixed thresholds.**
+  Training now raises each level's threshold, top-down, until auto-accepted
+  predictions on the validation split reach `auto_accept_precision` (new
+  `TrainingConfig` field, default 0.95). Thresholds never go below the old
+  defaults; a level that cannot reach the target is never auto-accepted (its
+  threshold is 1.01) and those items go to HUMAN_REVIEW with the confident levels
+  above it. On the HTS sample the old thresholds auto-accepted 7.5% of held-out
+  items at 62.8% precision; the fitted ones auto-accept none, because leaf
+  predictions cannot reach 95% there, while the confident chapter and heading
+  are right 98.6% and 95.3% of the time. `train_model` and `resume_training`
+  return a `routing` report. With fewer than 40 validation items the defaults are
+  kept.
+- `resume_training` now refits novelty data for the new weights and training data.
+  It previously saved new training embeddings next to stale centroids.
+
+### Changed
+- Predictions report `knn_threshold` in their novelty details, and the
+  OUT_OF_TAXONOMY reason names the kNN distance and threshold.
+
+### Upgrade notes
+- Models saved by 0.2.2 or earlier get the new novelty rule automatically: the
+  kNN threshold is fit from their stored training embeddings when they load. Their
+  thresholds are unchanged; retrain to fit thresholds to a target precision.
+- Expect far fewer AUTO_ACCEPT decisions on large or sparse taxonomies. That is
+  the fix: those auto-accepts were often wrong.
+
 ## [0.2.2] - 2026-10-30
 
 ### Security

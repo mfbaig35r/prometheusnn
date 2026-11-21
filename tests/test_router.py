@@ -73,3 +73,12 @@ def test_narrow_margin_triggers_review():
     result = router.route(pred, novelty)
     assert result.decision == RoutingDecision.HUMAN_REVIEW
     assert "margin" in result.review_reason
+
+
+def test_out_of_taxonomy_reason_names_knn_distance():
+    router = ThresholdRouter(_config(), level_names=["Cat", "Sub", "Type"])
+    pred = _make_prediction([0.95, 0.9, 0.85])
+    novelty = NoveltyScore(0.5, 0.5, 1.3, is_novel=True, knn_threshold=1.1)
+    result = router.route(pred, novelty)
+    assert result.decision == RoutingDecision.OUT_OF_TAXONOMY
+    assert "kNN distance 1.30 > 1.10" in result.review_reason

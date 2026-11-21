@@ -60,12 +60,19 @@ class ThresholdRouter:
 
     def route(self, prediction: CascadePrediction, novelty: NoveltyScore) -> RoutingResult:
         if novelty.is_novel:
+            if novelty.knn_threshold is not None:
+                reason = (
+                    "Embedding distant from all training data "
+                    f"(kNN distance {novelty.knn_distance:.2f} > {novelty.knn_threshold:.2f})"
+                )
+            else:
+                reason = f"Embedding distant from known classes (z={novelty.centroid_z_score:.2f})"
             return RoutingResult(
                 decision=RoutingDecision.OUT_OF_TAXONOMY,
                 confident_depth=None,
                 confident_path=[],
                 full_path=prediction.path,
-                review_reason=f"Embedding distant from known classes (z={novelty.centroid_z_score:.2f})",
+                review_reason=reason,
             )
 
         # Find deepest confident level

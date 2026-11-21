@@ -1,4 +1,15 @@
-"""Centroid + kNN dual novelty detection (generalized for N-level leaf)."""
+"""Novelty detection: is an input outside everything the model was trained on?
+
+The decision uses the distance from the input to its k-th nearest training embedding,
+against a threshold fit on the training set itself (a high percentile of leave-one-out
+kNN distances). That measures distance to the whole taxonomy, so it does not depend on
+the leaf prediction being right.
+
+The per-leaf centroid z-score is still computed and reported, and is the decision rule
+only for models saved without training embeddings. It is a poor decision rule on its own:
+leaves with a handful of near-identical training rows have a tiny spread, so any input not
+sitting on them scores as extreme even when it belongs to a sibling leaf.
+"""
 
 from __future__ import annotations
 
@@ -23,22 +34,54 @@ class NoveltyScore:
     centroid_z_score: float
     knn_distance: float
     is_novel: bool
+    knn_threshold: float | None = None
+
+
+DEFAULT_KNN_PERCENTILE = 99.0
+_MAX_THRESHOLD_QUERIES = 5000
+
+
+def leave_one_out_knn_distances(
+    embeddings: np.ndarray, k: int, max_queries: int = _MAX_THRESHOLD_QUERIES
+) -> np.ndarray:
+    """Distance from training rows to their k-th nearest *other* training row.
+
+    Uses at most ``max_queries`` rows as queries (a fixed random sample) so fitting stays
+    quick on large training sets; every row is still a candidate neighbor.
+    """
+    x = np.asarray(embeddings, dtype=np.float64)
+    n = len(x)
+    queries = np.arange(n)
+    if n > max_queries:
+        queries = np.sort(np.random.default_rng(0).choice(n, max_queries, replace=False))
+    sq = (x**2).sum(axis=1)
+    chunk = max(1, int(2e7 // max(n, 1)))
+    out = np.empty(len(queries))
+    for start in range(0, len(queries), chunk):
+        q = queries[start : start + chunk]
+        d2 = sq[q, None] + sq[None, :] - 2.0 * (x[q] @ x.T)
+        d2[np.arange(len(q)), q] = np.inf  # leave the row itself out
+        out[start : start + len(q)] = np.partition(d2, k - 1, axis=1)[:, k - 1]
+    return np.sqrt(np.maximum(out, 0.0))
 
 
 class NoveltyDetector:
-    """Dual novelty detection: centroid z-score + kNN distance."""
+    """Novelty from kNN distance to the training set; centroid z-score as a diagnostic."""
 
     def __init__(
         self,
         z_score_threshold: float = 2.5,
         knn_k: int = 10,
         novelty_conf_threshold: float = 0.70,
+        knn_percentile: float = DEFAULT_KNN_PERCENTILE,
     ):
         self.z_score_threshold = z_score_threshold
         self.knn_k = knn_k
         self.novelty_conf_threshold = novelty_conf_threshold
+        self.knn_percentile = knn_percentile
         self.centroids: dict[str, ClassCentroid] = {}
         self.training_embeddings: np.ndarray | None = None
+        self.knn_threshold: float | None = None
 
     def fit(
         self,
@@ -68,6 +111,15 @@ class NoveltyDetector:
                 count=int(mask.sum()),
             )
 
+        self.knn_threshold = self._fit_knn_threshold()
+
+    def _fit_knn_threshold(self) -> float | None:
+        """A high percentile of the training set's own leave-one-out kNN distances."""
+        x = self.training_embeddings
+        if x is None or len(x) <= self.knn_k:
+            return None
+        return float(np.percentile(leave_one_out_knn_distances(x, self.knn_k), self.knn_percentile))
+
     def score(self, embedding: np.ndarray, predicted_leaf: str, confidence: float) -> NoveltyScore:
         if predicted_leaf in self.centroids:
             info = self.centroids[predicted_leaf]
@@ -78,38 +130,32 @@ class NoveltyDetector:
             z_score = 10.0
 
         knn_dist = self._knn_distance(embedding)
-        is_novel = z_score > self.z_score_threshold and confidence < self.novelty_conf_threshold
+        if self.knn_threshold is not None:
+            is_novel = knn_dist > self.knn_threshold
+        else:
+            # Legacy rule, for models saved without training embeddings.
+            is_novel = z_score > self.z_score_threshold and confidence < self.novelty_conf_threshold
 
         return NoveltyScore(
             centroid_distance=dist,
             centroid_z_score=z_score,
             knn_distance=knn_dist,
             is_novel=is_novel,
+            knn_threshold=self.knn_threshold,
         )
 
     def _knn_distance(self, embedding: np.ndarray) -> float:
         if self.training_embeddings is None:
             return 0.0
         distances = np.linalg.norm(self.training_embeddings - embedding, axis=1)
-        sorted_d = np.sort(distances)
-        k = min(self.knn_k, len(sorted_d))
-        return float(sorted_d[k - 1])
+        k = min(self.knn_k, len(distances))
+        return float(np.partition(distances, k - 1)[k - 1])
 
     def save(self, path: Path):
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
-        np.savez(
-            path / "novelty_centroids.npz",
-            **{
-                f"centroid_{i}": info.centroid for i, (_, info) in enumerate(self.centroids.items())
-            },
-            class_names=list(self.centroids.keys()),
-            mean_dists=[info.mean_dist for info in self.centroids.values()],
-            std_dists=[info.std_dist for info in self.centroids.values()],
-            p95_dists=[info.p95_dist for info in self.centroids.values()],
-            counts=[info.count for info in self.centroids.values()],
-        )
+        np.savez(path / "novelty_centroids.npz", **self.get_centroids_data())
 
         if self.training_embeddings is not None:
             np.save(path / "novelty_embeddings.npy", self.training_embeddings)
@@ -146,6 +192,13 @@ class NoveltyDetector:
         if emb_path.exists():
             self.training_embeddings = np.load(emb_path, allow_pickle=False)
 
+        if "knn_threshold" in data.files:
+            self.knn_threshold = float(data["knn_threshold"])
+            self.knn_percentile = float(data["knn_percentile"])
+        else:
+            # Saved before 0.2.3: fit the threshold now from the stored training embeddings.
+            self.knn_threshold = self._fit_knn_threshold()
+
     def get_centroids_data(self) -> dict:
         """Return data dict suitable for np.savez."""
         data = {
@@ -156,4 +209,7 @@ class NoveltyDetector:
         data["std_dists"] = [info.std_dist for info in self.centroids.values()]
         data["p95_dists"] = [info.p95_dist for info in self.centroids.values()]
         data["counts"] = [info.count for info in self.centroids.values()]
+        if self.knn_threshold is not None:
+            data["knn_threshold"] = self.knn_threshold
+            data["knn_percentile"] = self.knn_percentile
         return data
