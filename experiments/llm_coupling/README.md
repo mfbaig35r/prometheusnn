@@ -46,18 +46,18 @@ A pick of "none of these" counts as correct when the answer was not offered.
 | Cascade top-1 alone | 25 | 23 |
 | Answer is in candidate set C (ceiling) | 89 | 85 |
 | + Claude Haiku 4.5 | 72 | 68 |
-| + Claude Sonnet 5 | 86 | pending |
+| + Claude Sonnet 5 | 86 | 87 |
 | + Claude Opus 5.5 | 98 | 95 |
 
 - **Model tier dominates; wording barely matters.** Rewriting costs 4 points of candidate
-  recall and 3 to 4 points per judge.
+  recall; Haiku loses 4 points, Opus 3, Sonnet none (86 to 87).
 - **Opus 5.5:** never wrong when it answered "none of these" (9/9, 13/13), overturned a correct
   cascade answer once in 200 items, and its "high" confidence was right 128 of 129 times.
 - **Haiku 4.5:** overturned 7 correct cascade answers per run; "high" confidence was right only
   75 to 83% of the time, and agreeing with the cascade did not make it more reliable (72%).
-- **Sonnet 5:** in between on accuracy (its plain-English run is incomplete: only items 51 to
-  100 are judged so far, in `runs/sonnet-5/plain/answers_2.json`); "high" confidence was right 56 of 59 times on the
-  tariff wording.
+- **Sonnet 5:** in between, 86 / 87. "None of these" was right 19 of 20 times, it overturned
+  8 correct cascade answers over 200 items, and "high" confidence was right 114 of 121 times
+  (94%). On plain English it classified 28 of the 35 items routed to OUT_OF_TAXONOMY.
 - **The novelty gate discards classifiable items.** On plain English the cascade routed 35 items
   to OUT_OF_TAXONOMY; Opus classified 32 of them correctly.
 - **AUTO_ACCEPT is miscalibrated at the leaf:** 62.8% correct on the 86 held-out items it
