@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-11-20
+
+### Security
+- **Dependency security update.** The lockfile carried 17 packages with published
+  advisories; it now has none (pip-audit, all extras). Minimum versions are
+  raised where the vulnerable code is reachable from PrometheusNN, so upgrading
+  an existing environment pulls the fixes:
+  - `transformers>=5.10.0` and `sentence-transformers>=5.6.0`: model-loading
+    flaws that could run code from a crafted model repository. Embedding models
+    are loaded by name, so a `train_model` call naming a malicious model reached
+    them.
+  - `mcp[cli]>=1.30.0,<2`: eleven advisories in the MCP SDK. The `<2` cap is
+    because mcp 2.x renamed `FastMCP`; migrating is separate work.
+  - `starlette>=1.3.1` in the `[ui]` extra: request-handling flaws in the
+    network-facing UI server's framework.
+  - `torch` is not given a higher minimum: its two advisories concern
+    TorchScript and `.pt2` loading, which PrometheusNN does not use. The
+    lockfile moves to 2.15 regardless.
+- Checked against the previous lockfile: MiniLM embeddings are unchanged
+  (minimum cosine 0.9999999 over 300 texts) and the HTS model gives the same
+  path for all 300.
+
 ## [0.2.3] - 2026-11-20
 
 ### Fixed
