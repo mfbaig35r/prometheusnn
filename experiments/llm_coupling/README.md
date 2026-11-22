@@ -63,15 +63,53 @@ A pick of "none of these" counts as correct when the answer was not offered.
 - **AUTO_ACCEPT is miscalibrated at the leaf:** 62.8% correct on the 86 held-out items it
   auto-accepted.
 
+Both were fixed in PrometheusNN 0.2.3 (kNN novelty; thresholds fit to a target precision).
+
+### 4. TypeSafe JEV as the judge
+
+[JEV](https://docs.typesafe.ai/models) (`jev-1.14.0`) is a non-generative model that returns a
+probability for each option of a declared set. Same 100 items and candidate sets as section 3,
+through the API (`POST /v1/systemone`, one Choice question with a "none" option).
+
+| Correct out of 100 | Tariff wording | Plain English |
+|---|---|---|
+| + JEV, plain labels (`04_jev_benchmark.py`) | 78 | 76 |
+| + JEV, structured options (`06_prompt_variants.py`) | 81 | 82 |
+| **JEV structured if confidence >= 0.7, else Sonnet 5** | **88** (36 items to Sonnet) | **91** (35 to Sonnet) |
+
+- **Between Haiku and Sonnet alone; better than Sonnet as a first pass.** Sending only JEV's
+  low-confidence items to Sonnet beat Sonnet alone (86 / 87) while Sonnet saw about a third of
+  the items. The 0.7 cutoff was not tuned on these items; 0.8 gives the same totals.
+- **The prompt fix: structured options.** About 70% of candidate labels are bare subheading
+  text ("Other", "Of synthetic fibers") with no heading. Naming each option by its HTS code and
+  describing it as `{"heading", "subheading"}` took the 200-item dev set from 150 to 163 right,
+  and the share auto-acceptable at 95% precision from 14% to 70%.
+- **JEV's misses are mostly sibling subheadings** (16 of 20 tariff, 13 of 18 plain), not wrong
+  headings. Two-step prompting (heading, then subheading) did not help.
+- **Legal chapter notes** (from hts-api, in the instructions or in the state) gave no
+  consistent gain over structured options: +4 tariff, -2 plain, at twice the tokens.
+- **JEV alone, no cascade** (beam search down the taxonomy, about 7 calls per item) scored 79 /
+  73, about the same as picking from the cascade's candidates.
+- **Order sensitivity:** the same pick under three option orders on 84-85% of items; averaging
+  probabilities across orders did not help.
+- **Cost and speed:** about 100 ms per request and about $0.0001 per item (structured);
+  everything in this section used about 8.3M input tokens (about $0.35).
+
+Prompt variants were chosen on a separate dev set (200 review items from the same held-out
+split, none of them among the 100), then scored once on the 100; see
+`06_prompt_variants.py` for all seven variants and their dev results.
+
 ### Caveats
 
 - 100 items, one run per setting: read the numbers as direction, not as precise rates.
 - The "plain English" rewrites are only moderately plain; technical goods stay technical and 11
   of 100 are near-copies of the original.
 - The judges likely know the public tariff text, which flatters them. No real invoice data yet.
-- Judges ran as Claude Code subagents, not through the API; cost was not measured. The first
-  Opus tariff run used 25-item JSON batches, every other run the 50-item text format in
-  `scripts/to_text.py`.
+- Claude judges ran as Claude Code subagents, not through the API; their cost was not
+  measured. The first Opus tariff run used 25-item JSON batches, every other run the 50-item
+  text format in `scripts/to_text.py`.
+- JEV's numbers are one run per setting; TypeSafe does not publish the architecture, and
+  JEV is hosted only (product text leaves the machine).
 
 ## Layout
 
@@ -84,7 +122,15 @@ scripts/to_text.py              blind judge batches (answer-key fields stripped)
 scripts/score.py                score a run against its key
 prompts/judge.md                judge instructions
 prompts/paraphrase.md           instructions that produced data/plain_texts.json
+prompts/jev.md                  the JEV request formats (plain labels, structured)
+scripts/04_jev_benchmark.py     JEV on the 100 items: plain labels, option orders, "any fits"
+                                question, and JEV alone down the taxonomy
+scripts/05_build_dev.py         data/dev_items.json (200 dev items) and data/taxonomy_info.json
+scripts/06_prompt_variants.py   seven JEV prompt variants (dev), and the chosen ones on the 100
+data/hts_chapter_notes.json     legal chapter notes (no statistical notes) for 91 chapters,
+                                from hts-api get_chapter_notes
 runs/<model>/<tariff|plain>/    each judge's raw answers
+runs/jev-1.14/, runs/jev-1.14-prompts/<variant>/<set>/   JEV answers (and raw responses)
 ```
 
 Fields starting with `_` in `data/*_items.json` are the answer key. Never point a judge at
@@ -105,7 +151,16 @@ uv run python experiments/llm_coupling/scripts/03_plain_pipeline.py
 # Judge: build blind batches outside data/, run prompts/judge.md on each, save answers_N.json
 python3 experiments/llm_coupling/scripts/to_text.py data/plain_items.json /tmp/judge
 python3 experiments/llm_coupling/scripts/score.py runs/opus-5.5/plain data/plain_items.json
+
+# JEV (needs a TypeSafe key)
+TYPESAFE_API_KEY=... uv run python experiments/llm_coupling/scripts/04_jev_benchmark.py
+uv run python experiments/llm_coupling/scripts/05_build_dev.py
+TYPESAFE_API_KEY=... uv run python experiments/llm_coupling/scripts/06_prompt_variants.py \
+  --sets dev --variants base,structured,twostep
 ```
 
 Training is not seeded, so a retrained model will differ slightly from the committed results.
 Steps 1 to 3 reproduced this run's numbers and item sets exactly against the original model.
+They depend on its 0.2.2 routing: `hts_viz` was later refit to 0.2.3 routing for the
+Observatory, which changes which items are HUMAN_REVIEW, so rerunning 01 and 02 against the
+refit model selects different items. The committed item sets are the ones that were judged.
